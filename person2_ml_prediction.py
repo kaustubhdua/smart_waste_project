@@ -34,17 +34,22 @@ def train_ml_model(csv_path="cleaned_waste_data.csv"):
     if missing:
         raise ValueError(f"Dataset is missing features: {sorted(missing)}")
 
-    # Predict the next observation for the same bin. This is created after
-    # preprocessing so the feature set remains strictly historical.
-    df[TARGET] = df.groupby("bin_id")["fill_level_pct"].shift(-1)
-    model_df = df.dropna(subset=FEATURES + [TARGET]).copy()
+    # Ensure the next-step target follows time order even if a supplied CSV
+    # was shuffled. Keep the target timestamp so the split can exclude training
+    # labels that cross into the holdout period.
+    df = df.sort_values(["bin_id", "timestamp"]).reset_index(drop=True)
+    grouped = df.groupby("bin_id", sort=False)
+    df["_target_timestamp"] = grouped["timestamp"].shift(-1)
+    df[TARGET] = grouped["fill_level_pct"].shift(-1)
+    model_df = df.dropna(subset=FEATURES + [TARGET, "_target_timestamp"]).copy()
     if len(model_df) < 20:
         raise ValueError("Not enough rows to train the waste prediction model")
 
     # A time-ordered holdout avoids leaking future observations into training.
     cutoff = model_df["timestamp"].quantile(0.8)
-    X_train = model_df.loc[model_df["timestamp"] < cutoff, FEATURES]
-    y_train = model_df.loc[model_df["timestamp"] < cutoff, TARGET]
+    train_mask = (model_df["timestamp"] < cutoff) & (model_df["_target_timestamp"] < cutoff)
+    X_train = model_df.loc[train_mask, FEATURES]
+    y_train = model_df.loc[train_mask, TARGET]
     X_test = model_df.loc[model_df["timestamp"] >= cutoff, FEATURES]
     y_test = model_df.loc[model_df["timestamp"] >= cutoff, TARGET]
     if X_train.empty or X_test.empty:
