@@ -1,3 +1,4 @@
+from math import isfinite
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 class OptimizationError(RuntimeError):
@@ -8,11 +9,15 @@ def optimize_cvrp(distance_matrix_m: list[list[float]], demands_liters: list[flo
     n = len(distance_matrix_m)
     if n < 2 or len(demands_liters) != n:
         raise ValueError("Matrix and demand dimensions must match and include a depot plus a stop")
-    if not vehicle_capacities_liters or any(c <= 0 for c in vehicle_capacities_liters):
+    if not vehicle_capacities_liters or any(not isfinite(float(c)) or c <= 0 for c in vehicle_capacities_liters):
         raise ValueError("At least one vehicle with positive capacity is required")
+    if not isinstance(depot, int) or not 0 <= depot < n:
+        raise ValueError("Depot index is outside the matrix")
     if any(len(row) != n for row in distance_matrix_m):
         raise ValueError("Distance matrix must be square")
-    if any(d < 0 for d in demands_liters) or demands_liters[depot] != 0:
+    if any(not isfinite(float(v)) or v < 0 for row in distance_matrix_m for v in row):
+        raise ValueError("Distances must be finite non-negative numbers")
+    if any(not isfinite(float(d)) or d < 0 for d in demands_liters) or demands_liters[depot] != 0:
         raise ValueError("Demands must be non-negative and depot demand must be zero")
     # OR-Tools integer callbacks: convert meters to rounded integer meters and
     # liters to milliliters to preserve practical precision for small bins.

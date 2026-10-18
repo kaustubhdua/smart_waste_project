@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from math import isfinite
 import json
 from hmac import compare_digest
 from uuid import uuid4
@@ -18,6 +19,13 @@ app = FastAPI(title="Smart Waste Operations API", version="1.1.0", description="
 if settings.auto_create_schema:
     Base.metadata.create_all(bind=engine)
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Device-Token'])
+
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+def _is_stale(measured_at: datetime) -> bool:
+    age_seconds = (datetime.now(timezone.utc) - _utc(measured_at)).total_seconds()
+    return age_seconds > settings.telemetry_stale_after_minutes * 60 or age_seconds < -settings.telemetry_future_skew_seconds
 
 def require_operator(authorization: str | None = Header(default=None)):
     expected = "Bearer " + settings.api_token
@@ -50,7 +58,10 @@ def list_bins(db: Session = Depends(get_db)):
 def ingest_telemetry(payload: TelemetryIn, db: Session = Depends(get_db)):
     if not db.get(Bin, payload.bin_id):
         raise HTTPException(404, "Unknown bin")
-    row = Telemetry(**payload.model_dump(), source="live")
+    measured_at = _utc(payload.measured_at)
+    if (measured_at - datetime.now(timezone.utc)).total_seconds() > settings.telemetry_future_skew_seconds:
+        raise HTTPException(422, "Telemetry timestamp is too far in the future")
+    row = Telemetry(**{**payload.model_dump(), "measured_at": measured_at}, source="live")
     db.add(row)
     try:
         db.commit()
@@ -58,6 +69,9 @@ def ingest_telemetry(payload: TelemetryIn, db: Session = Depends(get_db)):
         db.rollback()
         existing = db.scalar(select(Telemetry).where(Telemetry.device_id == payload.device_id, Telemetry.message_id == payload.message_id))
         if existing:
+            same_payload = (existing.bin_id == payload.bin_id and existing.fill_percent == payload.fill_percent and existing.measured_at == payload.measured_at.astimezone(timezone.utc))
+            if not same_payload:
+                raise HTTPException(409, "Message ID was already used with a different payload")
             return {"accepted": True, "duplicate": True, "telemetry_id": existing.id}
         raise HTTPException(409, "Telemetry could not be stored")
     db.refresh(row)
@@ -76,6 +90,8 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
     if not bin_row:
         raise HTTPException(404, "Unknown bin")
     latest = db.scalar(select(Telemetry).where(Telemetry.bin_id == payload.bin_id).order_by(Telemetry.measured_at.desc()).limit(1))
+    if latest is not None and _is_stale(latest.measured_at):
+        raise HTTPException(422, "Latest telemetry is stale; provide an explicit demand or ingest a fresh reading")
     demand = payload.demand_liters
     if demand is None:
         if latest is None:
@@ -97,6 +113,47 @@ ALLOWED = {
     "verified": set(),
 }
 
+
+@app.get("/api/v1/jobs", dependencies=[Depends(require_operator)])
+def list_jobs(status: str | None = None, limit: int = 100, db: Session = Depends(get_db)):
+    query = select(CollectionJob).order_by(CollectionJob.created_at.desc()).limit(max(1, min(limit, 500)))
+    if status:
+        if status not in ALLOWED:
+            raise HTTPException(422, "Unknown job status")
+        query = select(CollectionJob).where(CollectionJob.status == status).order_by(CollectionJob.created_at.desc()).limit(max(1, min(limit, 500)))
+    rows = db.scalars(query)
+    return [{"id": j.id, "bin_id": j.bin_id, "status": j.status, "demand_liters": j.demand_liters, "priority": j.priority, "assigned_vehicle_id": j.assigned_vehicle_id, "created_at": j.created_at, "updated_at": j.updated_at} for j in rows]
+
+@app.get("/api/v1/jobs/{job_id}/events", dependencies=[Depends(require_operator)])
+def job_events(job_id: str, db: Session = Depends(get_db)):
+    if not db.get(CollectionJob, job_id):
+        raise HTTPException(404, "Unknown job")
+    rows = db.scalars(select(ServiceEvent).where(ServiceEvent.job_id == job_id).order_by(ServiceEvent.created_at, ServiceEvent.id))
+    return [{"id": e.id, "actor": e.actor, "previous_status": e.previous_status, "new_status": e.new_status, "note": e.note, "created_at": e.created_at} for e in rows]
+
+@app.get("/api/v1/operations/summary", dependencies=[Depends(require_operator)])
+def operations_summary(db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    bin_rows = list(db.scalars(select(Bin).where(Bin.active.is_(True))))
+    telemetry_rows = list(db.scalars(select(Telemetry)))
+    latest_by_bin = {}
+    for event in telemetry_rows:
+        previous = latest_by_bin.get(event.bin_id)
+        if previous is None or _utc(event.measured_at) > _utc(previous.measured_at):
+            latest_by_bin[event.bin_id] = event
+    fresh = sum(1 for event in latest_by_bin.values() if not _is_stale(event.measured_at))
+    jobs = list(db.scalars(select(CollectionJob)))
+    return {
+        "generated_at": now,
+        "active_bins": len(bin_rows),
+        "bins_with_telemetry": len(latest_by_bin),
+        "fresh_telemetry_bins": fresh,
+        "stale_or_future_telemetry_bins": len(latest_by_bin) - fresh,
+        "jobs_by_status": {status: sum(1 for job in jobs if job.status == status) for status in ALLOWED},
+        "vehicles_active": sum(1 for v in db.scalars(select(Vehicle)) if v.active),
+        "telemetry_stale_after_minutes": settings.telemetry_stale_after_minutes,
+        "data_is_simulated": all(b.source == "demo" for b in bin_rows) if bin_rows else False,
+    }
 
 @app.post("/api/v1/vehicles", dependencies=[Depends(require_operator)], status_code=201)
 def create_vehicle(payload: VehicleCreate, db: Session = Depends(get_db)):
@@ -164,6 +221,8 @@ async def optimize_route(payload: RouteRequest, db: Session = Depends(get_db)):
         latest = db.scalar(select(Telemetry).where(Telemetry.bin_id == row.id).order_by(Telemetry.measured_at.desc()).limit(1))
         if latest is None:
             raise HTTPException(422, f"Missing telemetry for bin {row.id}; demand cannot be estimated")
+        if _is_stale(latest.measured_at):
+            raise HTTPException(422, f"Stale telemetry for bin {row.id}; route optimization requires fresh readings")
         demands.append(row.capacity_liters * latest.fill_percent / 100)
     capacities = [payload.vehicle_capacity_liters] * payload.num_vehicles
     try:
@@ -203,6 +262,8 @@ async def preview_route(payload: RouteRequest, db: Session = Depends(get_db)):
         latest = db.scalar(select(Telemetry).where(Telemetry.bin_id == row.id).order_by(Telemetry.measured_at.desc()).limit(1))
         if latest is None:
             raise HTTPException(422, f"Missing telemetry for bin {row.id}; demand cannot be estimated")
+        if _is_stale(latest.measured_at):
+            raise HTTPException(422, f"Stale telemetry for bin {row.id}; route preview requires fresh readings")
         total_demand += row.capacity_liters * latest.fill_percent / 100
     if total_demand > payload.vehicle_capacity_liters:
         raise HTTPException(422, detail={"message": "Route exceeds vehicle capacity", "estimated_demand_liters": total_demand, "capacity_liters": payload.vehicle_capacity_liters})
