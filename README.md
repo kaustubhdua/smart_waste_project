@@ -89,12 +89,21 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
 | GET | /api/v1/driver/jobs | List stops for the authenticated driver vehicle |
 | POST | /api/v1/driver/jobs/{job_id}/transition | Start, complete or report an assigned stop exception |
 | DELETE | /api/v1/devices/{device_id} | Revoke a device credential |
-| POST | /api/v1/telemetry | Ingest a live device reading |\n| POST | /api/v1/telemetry/import-csv | Import validated historical telemetry CSV (2 MB / 10,000 row limit) |
-| GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |\n| GET | /api/v1/operations/summary | Inspect freshness and job-state counts |\n| GET | /api/v1/forecasts | Predict next-observation fill for bins with suitable recent history and a trained artifact |\n| GET | /api/v1/jobs | List collection jobs, optionally filtered by status |\n| GET | /api/v1/jobs/{job_id}/events | Inspect service history |\n| POST | /api/v1/vehicles | Register a collection vehicle |\n| POST | /api/v1/jobs/{job_id}/assign | Assign a job to a capacity-checked vehicle |
+| POST | /api/v1/telemetry | Ingest a live device reading |
+| POST | /api/v1/telemetry/import-csv | Import validated historical telemetry CSV (2 MB / 10,000 row limit) |
+| GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |
+| GET | /api/v1/operations/summary | Inspect freshness and job-state counts |
+| GET | /api/v1/forecasts | Predict next-observation fill for bins with suitable recent history and a trained artifact |
+| GET | /api/v1/jobs | List collection jobs, optionally filtered by status |
+| GET | /api/v1/jobs/{job_id}/events | Inspect service history |
+| POST | /api/v1/vehicles | Register a collection vehicle |
+| POST | /api/v1/jobs/{job_id}/assign | Assign a job to a capacity-checked vehicle |
 | POST | /api/v1/jobs | Create a collection candidate |
 | POST | /api/v1/jobs/{job_id}/transitions | Record a validated lifecycle transition |
-| POST | /api/v1/routes/optimize | Preview an optimized route plan |\n| POST | /api/v1/routes/dispatch | Optimize approved jobs against registered vehicles and assign stops transactionally |
-| GET | /api/v1/routes/plans | List persisted route plans |\n| GET | /health/ready | Check database readiness |
+| POST | /api/v1/routes/optimize | Preview an optimized route plan |
+| POST | /api/v1/routes/dispatch | Optimize approved jobs against registered vehicles and assign stops transactionally |
+| GET | /api/v1/routes/plans | List persisted route plans |
+| GET | /health/ready | Check database readiness |
 | GET | /api/v1/routes/plans/{plan_id} | Retrieve a route plan |
 
 ## Limitations and next production gates

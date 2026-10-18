@@ -22,7 +22,11 @@ API_TOKEN=test-operator-token pytest -q
 
 The API defaults to a local SQLite database for development. Docker Compose configures PostgreSQL/PostGIS. Alembic migrations are applied automatically by the API container. Use a managed secret store before production.
 
-## Optional ML model artifact\n\nFrom the repository root, install `requirements.txt` and run `python person2_ml_prediction.py`. This trains a one-step-ahead model on the configured CSV and writes `models/waste_model.pkl`. The Compose stack mounts that directory read-only; rebuild/restart the API after training. The forecasts endpoint returns HTTP 503 when no artifact exists and skips bins without fresh temperature readings or enough history. The current model is not a validated 6/12-hour forecast. Keep `USE_MODEL_FOR_DISPATCH=false` until evaluation on representative field data supports enabling it.\n\n## API flow
+## Optional ML model artifact
+
+From the repository root, install `requirements.txt` and run `python person2_ml_prediction.py`. This trains a one-step-ahead model on the configured CSV and writes `models/waste_model.pkl`. The Compose stack mounts that directory read-only; rebuild/restart the API after training. The forecasts endpoint returns HTTP 503 when no artifact exists and skips bins without fresh temperature readings or enough history. The current model is not a validated 6/12-hour forecast. Keep `USE_MODEL_FOR_DISPATCH=false` until evaluation on representative field data supports enabling it.
+
+## API flow
 
 1. Create a bin using `POST /api/v1/bins` with an operator bearer token.
 2. Enroll a device with `POST /api/v1/devices`, then send telemetry to `POST /api/v1/telemetry` using the returned per-device `X-Device-Token`. Tokens can be rotated or revoked.
@@ -33,4 +37,4 @@ The API defaults to a local SQLite database for development. Docker Compose conf
 
 ## Data truthfulness
 
-Every bin has a `source` of `live`, `imported`, or `demo`. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. Routing uses real road-network distance/time data; if the provider fails, the API returns an error rather than fabricating distances. Forecasts are not yet served by the API and no field-performance claims are made. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.
+Every bin has a `source` of `live`, `imported`, or `demo`. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. Routing uses real road-network distance/time data; if the provider fails, the API returns an error rather than fabricating distances. The API serves next-observation forecasts when a trained artifact and suitable telemetry are available; no field-performance claims are made. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.
