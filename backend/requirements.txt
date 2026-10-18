@@ -4,7 +4,7 @@ SQLAlchemy==2.0.39
 psycopg[binary]==3.2.6
 pydantic-settings==2.16.0
 httpx==0.28.1
-ortools==9.12.4544
+ortools==9.15.6755
 alembic==1.15.2
 pytest==8.3.5
 
