@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from math import exp
 import json
 from hmac import compare_digest
 from uuid import uuid4
@@ -25,6 +26,15 @@ def _utc(value: datetime) -> datetime:
 def _is_stale(measured_at: datetime) -> bool:
     age_seconds = (datetime.now(timezone.utc) - _utc(measured_at)).total_seconds()
     return age_seconds > settings.telemetry_stale_after_minutes * 60 or age_seconds < -settings.telemetry_future_skew_seconds
+
+def _priority_score(fill_percent: float, bin_row: Bin) -> float:
+    hours_elapsed = 0.0
+    if bin_row.last_emptied_at is not None:
+        hours_elapsed = max(0.0, (datetime.now(timezone.utc) - _utc(bin_row.last_emptied_at)).total_seconds() / 3600)
+    fill_weight = 1.0 / (1.0 + exp(-0.1 * (min(100.0, max(0.0, fill_percent)) - 65.0)))
+    time_weight = min(hours_elapsed / 48.0, 1.0)
+    criticality_multiplier = {1: 0.8, 2: 0.9, 3: 1.0, 4: 1.15, 5: 1.3}.get(bin_row.criticality, 1.0)
+    return round(min(100.0, max(0.0, (70.0 * fill_weight + 30.0 * time_weight) * criticality_multiplier)), 2)
 
 def require_operator(authorization: str | None = Header(default=None)):
     expected = "Bearer " + settings.api_token
@@ -104,11 +114,13 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
         if latest is None:
             raise HTTPException(422, "Demand is required when no telemetry exists")
         demand = bin_row.capacity_liters * latest.fill_percent / 100
-    job = CollectionJob(id=str(uuid4()), bin_id=payload.bin_id, demand_liters=demand, priority=payload.priority)
+    fill_for_priority = latest.fill_percent if latest is not None and not _is_stale(latest.measured_at) else 0.0
+    priority = payload.priority if payload.priority is not None else _priority_score(fill_for_priority, bin_row)
+    job = CollectionJob(id=str(uuid4()), bin_id=payload.bin_id, demand_liters=demand, priority=priority)
     db.add(job)
     db.add(ServiceEvent(job_id=job.id, actor="system", previous_status="none", new_status="detected", note="Collection candidate created"))
     db.commit()
-    return {"id": job.id, "bin_id": job.bin_id, "status": job.status, "demand_liters": job.demand_liters, "priority": job.priority}
+    return {"id": job.id, "bin_id": job.bin_id, "status": job.status, "demand_liters": job.demand_liters, "priority": job.priority, "priority_method": "weighted heuristic"}
 
 ALLOWED = {
     "detected": {"approved", "exception"},

@@ -30,7 +30,7 @@ class TelemetryIn(BaseModel):
 class JobCreate(BaseModel):
     bin_id: str
     demand_liters: float | None = Field(default=None, gt=0)
-    priority: float = Field(default=0, ge=0, le=100)
+    priority: float | None = Field(default=None, ge=0, le=100)
 
 class TransitionIn(BaseModel):
     status: str = Field(pattern="^(approved|assigned|in_progress|completed|exception|verified)$")

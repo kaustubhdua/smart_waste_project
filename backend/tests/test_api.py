@@ -133,3 +133,14 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
         assert found["status"] == "assigned"
         assert found["assigned_vehicle_id"] == "dispatch-truck"
     assert client.get("/health/ready").json()["status"] == "ready"
+
+def test_job_priority_is_computed_from_fresh_fill_and_bin_criticality():
+    b = {"id":"bin-priority","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":5,"source":"live"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    event = {"bin_id":"bin-priority","device_id":"priority-device","message_id":"priority-now","fill_percent":90,"measured_at":datetime.now(timezone.utc).isoformat()}
+    assert client.post("/api/v1/telemetry", json=event, headers=DEVICE).status_code == 202
+    job = client.post("/api/v1/jobs", json={"bin_id":"bin-priority"}, headers=OP)
+    assert job.status_code == 201
+    assert 0 <= job.json()["priority"] <= 100
+    assert job.json()["priority_method"] == "weighted heuristic"
+    assert job.json()["demand_liters"] == 900
