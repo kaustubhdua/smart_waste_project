@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone\nimport json
 from hmac import compare_digest
 from uuid import uuid4
 from fastapi import FastAPI, Depends, Header, HTTPException
@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .config import settings
 from .db import Base, engine, get_db
-from .models import Bin, Telemetry, CollectionJob, ServiceEvent
+from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan
 from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest
 from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
@@ -146,7 +146,7 @@ async def optimize_route(payload: RouteRequest, db: Session = Depends(get_db)):
         raise HTTPException(503, str(exc)) from exc
     except (OptimizationError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": "OSRM", "solver": optimized["solver"], "data_mode": "telemetry-derived demand; verify sensor calibration before operational use"}
+    plan_id = str(uuid4())\n    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": "OSRM", "solver": optimized["solver"], "data_mode": "telemetry-derived demand; verify sensor calibration before operational use"}\n    db.add(RoutePlan(id=plan_id, depot_latitude=payload.depot_latitude, depot_longitude=payload.depot_longitude, routing_provider="OSRM", solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))\n    db.commit()\n    return {"route_plan_id": plan_id, **response_payload}
 
 @app.post("/api/v1/routes/preview", dependencies=[Depends(require_operator)])
 async def preview_route(payload: RouteRequest, db: Session = Depends(get_db)):
@@ -170,3 +170,4 @@ async def preview_route(payload: RouteRequest, db: Session = Depends(get_db)):
     except RoutingError as exc:
         raise HTTPException(503, str(exc)) from exc
     return {"ordered_bin_ids": [b.id for b in bins], "estimated_demand_liters": total_demand, "capacity_liters": payload.vehicle_capacity_liters, "capacity_utilization": round(total_demand / payload.vehicle_capacity_liters, 4), "road_distance_meters": route["distance_meters"], "estimated_duration_seconds": route["duration_seconds"], "geometry": route["geometry"], "optimization": "road-route-preview; stop ordering supplied by caller, not optimized"}
+\n@app.get("/api/v1/routes/plans", dependencies=[Depends(require_operator)])\ndef list_route_plans(limit: int = 20, db: Session = Depends(get_db)):\n    rows = db.scalars(select(RoutePlan).order_by(RoutePlan.created_at.desc()).limit(max(1, min(limit, 100))))\n    return [{"id": row.id, "created_at": row.created_at, "total_distance_meters": row.total_distance_meters, "routing_provider": row.routing_provider, "solver": row.solver} for row in rows]\n\n@app.get("/api/v1/routes/plans/{plan_id}", dependencies=[Depends(require_operator)])\ndef get_route_plan(plan_id: str, db: Session = Depends(get_db)):\n    row = db.get(RoutePlan, plan_id)\n    if not row:\n        raise HTTPException(404, "Unknown route plan")\n    return {"route_plan_id": row.id, **json.loads(row.route_payload), "created_at": row.created_at}\n

@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 class BinCreate(BaseModel):
     id: str = Field(min_length=1, max_length=80)
@@ -36,3 +36,10 @@ class RouteRequest(BaseModel):
     bin_ids: list[str] = Field(min_length=1, max_length=50)
     vehicle_capacity_liters: float = Field(gt=0)
     num_vehicles: int = Field(default=1, ge=1, le=20)
+
+    @field_validator("bin_ids")
+    @classmethod
+    def unique_bins(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("bin_ids must not contain duplicates")
+        return value

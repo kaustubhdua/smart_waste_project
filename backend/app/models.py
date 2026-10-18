@@ -60,3 +60,14 @@ class ServiceEvent(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     job: Mapped[CollectionJob] = relationship(back_populates="events")
+
+class RoutePlan(Base):
+    __tablename__ = "route_plans"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    depot_latitude: Mapped[float] = mapped_column(Float)
+    depot_longitude: Mapped[float] = mapped_column(Float)
+    routing_provider: Mapped[str] = mapped_column(String(40))
+    solver: Mapped[str] = mapped_column(String(120))
+    total_distance_meters: Mapped[float] = mapped_column(Float)
+    route_payload: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
