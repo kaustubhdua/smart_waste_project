@@ -136,7 +136,9 @@ def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
     if not job:
         raise HTTPException(404, "Unknown job")
-    if payload.status == "assigned" and not job.assigned_vehicle_id:\n        raise HTTPException(409, "Assign a vehicle using the assignment endpoint before transitioning to assigned")\n    if payload.status not in ALLOWED.get(job.status, set()):
+    if payload.status == "assigned" and not job.assigned_vehicle_id:
+        raise HTTPException(409, "Assign a vehicle using the assignment endpoint before transitioning to assigned")
+    if payload.status not in ALLOWED.get(job.status, set()):
         raise HTTPException(409, f"Invalid transition: {job.status} -> {payload.status}")
     previous = job.status
     job.status = payload.status
