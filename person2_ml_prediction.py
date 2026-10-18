@@ -4,39 +4,25 @@ from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-
 FEATURES = [
-    "capacity_liters",
-    "temperature_c",
-    "hour",
-    "day_of_week",
-    "is_weekend",
-    "fill_lag_1h",
-    "fill_lag_3h",
-    "rolling_mean_6h",
+    "capacity_liters", "temperature_c", "hour", "day_of_week",
+    "is_weekend", "fill_lag_1h", "fill_lag_3h", "rolling_mean_6h",
 ]
 TARGET = "next_fill_level_pct"
 MODEL_FILENAME = "waste_model.pkl"
 
 
-def train_ml_model(csv_path="cleaned_waste_data.csv"):
-    """Train a leakage-safe one-step-ahead fill-level predictor."""
-    print(f"Loading preprocessed dataset from {csv_path}...")
+def train_ml_model(csv_path="cleaned_waste_data.csv", model_path=MODEL_FILENAME):
+    """Train and evaluate a one-step-ahead model using a chronological holdout."""
     df = pd.read_csv(csv_path)
-    if "timestamp" not in df.columns:
-        raise ValueError("Dataset must contain timestamp")
-
+    if "timestamp" not in df.columns or "bin_id" not in df.columns or "fill_level_pct" not in df.columns:
+        raise ValueError("Dataset must contain timestamp, bin_id and fill_level_pct")
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
     if df["timestamp"].isna().any():
         raise ValueError("Dataset contains invalid timestamps")
-
     missing = set(FEATURES).difference(df.columns)
     if missing:
         raise ValueError(f"Dataset is missing features: {sorted(missing)}")
-
-    # Ensure the next-step target follows time order even if a supplied CSV
-    # was shuffled. Keep the target timestamp so the split can exclude training
-    # labels that cross into the holdout period.
     df = df.sort_values(["bin_id", "timestamp"]).reset_index(drop=True)
     grouped = df.groupby("bin_id", sort=False)
     df["_target_timestamp"] = grouped["timestamp"].shift(-1)
@@ -44,49 +30,57 @@ def train_ml_model(csv_path="cleaned_waste_data.csv"):
     model_df = df.dropna(subset=FEATURES + [TARGET, "_target_timestamp"]).copy()
     if len(model_df) < 20:
         raise ValueError("Not enough rows to train the waste prediction model")
-
-    # A time-ordered holdout avoids leaking future observations into training.
     cutoff = model_df["timestamp"].quantile(0.8)
     train_mask = (model_df["timestamp"] < cutoff) & (model_df["_target_timestamp"] < cutoff)
-    X_train = model_df.loc[train_mask, FEATURES]
-    y_train = model_df.loc[train_mask, TARGET]
-    X_test = model_df.loc[model_df["timestamp"] >= cutoff, FEATURES]
-    y_test = model_df.loc[model_df["timestamp"] >= cutoff, TARGET]
+    test_mask = model_df["timestamp"] >= cutoff
+    X_train, y_train = model_df.loc[train_mask, FEATURES], model_df.loc[train_mask, TARGET]
+    X_test, y_test = model_df.loc[test_mask, FEATURES], model_df.loc[test_mask, TARGET]
     if X_train.empty or X_test.empty:
         raise ValueError("Unable to create chronological train/test split")
 
-    print("Training Random Forest Regressor model...")
-    # A mean-only baseline helps show whether the model adds value beyond a
-    # constant prediction. These are synthetic-data holdout metrics, not field results.
-    baseline = DummyRegressor(strategy="mean")
-    baseline.fit(X_train, y_train)
+    baseline = DummyRegressor(strategy="mean").fit(X_train, y_train)
     baseline_predictions = baseline.predict(X_test)
-    baseline_mae = mean_absolute_error(y_test, baseline_predictions)
-    baseline_rmse = mean_squared_error(y_test, baseline_predictions) ** 0.5
-
-    model = RandomForestRegressor(
-        n_estimators=200,
-        random_state=42,
-        n_jobs=-1,
-    )
+    persistence_predictions = model_df.loc[test_mask, "fill_level_pct"].to_numpy()
+    model = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
     model.fit(X_train, y_train)
-
     predictions = model.predict(X_test)
-    mae = mean_absolute_error(y_test, predictions)
-    rmse = mean_squared_error(y_test, predictions) ** 0.5
-
-    print("Chronological synthetic-data holdout evaluation (not field performance):")
-    print(f"   - Holdout rows: {len(X_test)}")
-    print(f"   - Mean baseline MAE: {baseline_mae:.2f} percentage points")
-    print(f"   - Mean baseline RMSE: {baseline_rmse:.2f} percentage points")
-    print(f"   - Random Forest MAE: {mae:.2f} percentage points")
-    print(f"   - Random Forest RMSE: {rmse:.2f} percentage points")
-    print(f"   - MAE improvement vs baseline: {baseline_mae - mae:.2f} percentage points")
-
-    joblib.dump(model, MODEL_FILENAME)
-    print(f"Successfully saved trained model to '{MODEL_FILENAME}'.")
-
+    metrics = {
+        "holdout_rows": int(len(X_test)),
+        "mean_baseline_mae": float(mean_absolute_error(y_test, baseline_predictions)),
+        "persistence_baseline_mae": float(mean_absolute_error(y_test, persistence_predictions)),
+        "random_forest_mae": float(mean_absolute_error(y_test, predictions)),
+        "mean_baseline_rmse": float(mean_squared_error(y_test, baseline_predictions) ** 0.5),
+        "persistence_baseline_rmse": float(mean_squared_error(y_test, persistence_predictions) ** 0.5),
+        "random_forest_rmse": float(mean_squared_error(y_test, predictions) ** 0.5),
+        "evaluation_note": "Chronological holdout only; synthetic data is not evidence of field performance.",
+    }
+    joblib.dump({"model": model, "features": FEATURES, "metrics": metrics, "target": TARGET}, model_path)
+    print("Chronological holdout metrics (not field performance):")
+    for key, value in metrics.items():
+        print(f"  {key}: {value}")
+    print(f"Saved model artifact to {model_path}")
     return model
+
+
+def load_ml_model(model_path=MODEL_FILENAME):
+    """Load a trained artifact; return None when no artifact exists."""
+    import os
+    if not os.path.exists(model_path):
+        return None
+    artifact = joblib.load(model_path)
+    # Read old model-only artifacts as well as the current metadata envelope.
+    return artifact["model"] if isinstance(artifact, dict) and "model" in artifact else artifact
+
+
+def predict_next_fill(model, rows):
+    """Predict the next observed fill level from rows containing the declared features."""
+    if model is None:
+        return None
+    missing = set(FEATURES).difference(rows.columns)
+    if missing:
+        raise ValueError(f"Prediction rows are missing features: {sorted(missing)}")
+    values = model.predict(rows[FEATURES])
+    return pd.Series(values, index=rows.index).clip(0, 100)
 
 
 if __name__ == "__main__":
