@@ -15,7 +15,9 @@
 - Alembic initial schema migration and a follow-up device-credential migration.
 - Model training separated from dashboard startup, model artifact loading/inference, and mean/persistence baseline metrics.
 - Priority engine accurately described as a deterministic weighted heuristic; service time is not fabricated when collection history is absent.
-- Responsive operator console served by Nginx, connected to API bin records, telemetry history and route optimization.
+- Responsive operator console served by Nginx, connected to API bin records, telemetry history, device enrollment, job creation/approval, vehicle registration and route dispatch.
+- Online mobile driver view with vehicle-scoped jobs, navigation handoff, start/complete/exception actions and driver credential enrollment.
+- Authenticated historical telemetry CSV import with schema validation, deduplication, batch commit, and explicit imported source labels.
 - Docker Compose for PostgreSQL/PostGIS, API and web console; environment template, tests and CI workflows.
 
 ## Still required before production
@@ -24,5 +26,5 @@
 - The public OSRM endpoint is a demonstration dependency with usage limits and no service guarantee. Production should use a self-hosted or contracted routing provider.
 - The ML model is one-step-ahead and currently trained on the CSV dataset. It is not a calibrated 6/12-hour field forecast and is not yet served by the API.
 - No physical sensor has been tested. Live telemetry requires a device to send authenticated, calibrated readings.
-- The web console is an operator prototype, not a full offline-capable driver PWA; user/role identity and audit review still need hardening.
+- Driver view is online-only; it has no offline action queue or embedded turn-by-turn navigation. Operator login remains a shared bearer token rather than multi-user identity and granular RBAC.
 - CI verifies code and migrations, but does not prove hardware calibration, production load, field accuracy or real-world savings.

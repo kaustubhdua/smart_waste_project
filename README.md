@@ -85,6 +85,9 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
 | POST | /api/v1/devices | Enroll a device and issue its one-time token |
 | GET | /api/v1/devices | List device status without revealing tokens |
 | POST | /api/v1/devices/{device_id}/rotate-token | Rotate a device credential |
+| POST | /api/v1/drivers | Enroll a driver and issue a one-time token |
+| GET | /api/v1/driver/jobs | List stops for the authenticated driver vehicle |
+| POST | /api/v1/driver/jobs/{job_id}/transition | Start, complete or report an assigned stop exception |
 | DELETE | /api/v1/devices/{device_id} | Revoke a device credential |
 | POST | /api/v1/telemetry | Ingest a live device reading |\n| POST | /api/v1/telemetry/import-csv | Import validated historical telemetry CSV (2 MB / 10,000 row limit) |
 | GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |\n| GET | /api/v1/operations/summary | Inspect freshness and job-state counts |\n| GET | /api/v1/jobs | List collection jobs, optionally filtered by status |\n| GET | /api/v1/jobs/{job_id}/events | Inspect service history |\n| POST | /api/v1/vehicles | Register a collection vehicle |\n| POST | /api/v1/jobs/{job_id}/assign | Assign a job to a capacity-checked vehicle |
@@ -103,4 +106,4 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
 - No physical sensor, calibration process, municipal pilot, or real operational savings claim has been validated.
 - Use production-grade secret management, TLS, backups, monitoring, threat modeling, and a reviewed migration process before exposing the service publicly.
 
-See docs/IMPLEMENTATION_STATUS.md and README_PLATFORM.md for details.
+See [implementation status](docs/IMPLEMENTATION_STATUS.md) and README_PLATFORM.md for details.

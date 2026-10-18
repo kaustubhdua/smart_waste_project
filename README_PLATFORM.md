@@ -20,7 +20,7 @@ pip install -r requirements.txt
 API_TOKEN=test-operator-token DEVICE_TOKEN=test-device-token pytest -q
 ```
 
-The API defaults to a local SQLite database for development. Docker Compose configures PostgreSQL/PostGIS. Before production, add Alembic migrations and a managed secret store.
+The API defaults to a local SQLite database for development. Docker Compose configures PostgreSQL/PostGIS. Alembic migrations are applied automatically by the API container. Use a managed secret store before production.
 
 ## API flow
 
