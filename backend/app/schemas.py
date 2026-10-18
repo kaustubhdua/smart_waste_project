@@ -78,3 +78,7 @@ class DispatchRequest(BaseModel):
         if value is not None and len(value) != len(set(value)):
             raise ValueError("vehicle_ids must not contain duplicates")
         return value
+
+class DeviceCreate(BaseModel):
+    id: str = Field(min_length=1, max_length=100)
+    bin_id: str = Field(min_length=1, max_length=80)

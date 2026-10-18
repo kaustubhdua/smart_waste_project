@@ -71,3 +71,12 @@ class RoutePlan(Base):
     total_distance_meters: Mapped[float] = mapped_column(Float)
     route_payload: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+class Device(Base):
+    __tablename__ = "devices"
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    bin_id: Mapped[str] = mapped_column(ForeignKey("bins.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

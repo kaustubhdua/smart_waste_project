@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from math import exp
 import json
 from hmac import compare_digest
+from hashlib import sha256
+from secrets import token_urlsafe
 from uuid import uuid4
 from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,8 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .config import settings
 from .db import Base, engine, get_db
-from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle
-from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest
+from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device
+from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate
 from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 
@@ -41,10 +43,6 @@ def require_operator(authorization: str | None = Header(default=None)):
     if not authorization or not compare_digest(authorization, expected) or settings.api_token.startswith(("change-me", "replace-with")):
         raise HTTPException(status_code=401, detail="Valid configured operator bearer token required")
 
-def require_device(x_device_token: str | None = Header(default=None)):
-    if not x_device_token or not compare_digest(x_device_token, settings.device_token) or settings.device_token.startswith(("change-me", "replace-with")):
-        raise HTTPException(status_code=401, detail="Valid configured device token required")
-
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "smart-waste-api"}
@@ -71,14 +69,57 @@ def create_bin(payload: BinCreate, db: Session = Depends(get_db)):
 def list_bins(db: Session = Depends(get_db)):
     return list(db.scalars(select(Bin).where(Bin.active.is_(True)).order_by(Bin.id)))
 
-@app.post("/api/v1/telemetry", dependencies=[Depends(require_device)], status_code=202)
-def ingest_telemetry(payload: TelemetryIn, db: Session = Depends(get_db)):
+@app.post("/api/v1/devices", dependencies=[Depends(require_operator)], status_code=201)
+def register_device(payload: DeviceCreate, db: Session = Depends(get_db)):
+    if not db.get(Bin, payload.bin_id):
+        raise HTTPException(404, "Unknown bin")
+    if db.get(Device, payload.id):
+        raise HTTPException(409, "Device already exists; rotate its token or use another ID")
+    raw_token = token_urlsafe(32)
+    device = Device(id=payload.id, bin_id=payload.bin_id, token_hash=sha256(raw_token.encode("utf-8")).hexdigest())
+    db.add(device)
+    db.commit()
+    return {"id": device.id, "bin_id": device.bin_id, "active": device.active, "token": raw_token, "token_notice": "Store this token securely; it will not be shown again."}
+
+@app.get("/api/v1/devices", dependencies=[Depends(require_operator)])
+def list_devices(db: Session = Depends(get_db)):
+    rows = db.scalars(select(Device).order_by(Device.id))
+    return [{"id": d.id, "bin_id": d.bin_id, "active": d.active, "last_seen_at": d.last_seen_at, "created_at": d.created_at} for d in rows]
+
+@app.post("/api/v1/devices/{device_id}/rotate-token", dependencies=[Depends(require_operator)])
+def rotate_device_token(device_id: str, db: Session = Depends(get_db)):
+    device = db.get(Device, device_id)
+    if not device:
+        raise HTTPException(404, "Unknown device")
+    raw_token = token_urlsafe(32)
+    device.token_hash = sha256(raw_token.encode("utf-8")).hexdigest()
+    device.active = True
+    db.commit()
+    return {"id": device.id, "token": raw_token, "token_notice": "Store this token securely; the previous token is now invalid."}
+
+@app.delete("/api/v1/devices/{device_id}", dependencies=[Depends(require_operator)])
+def revoke_device(device_id: str, db: Session = Depends(get_db)):
+    device = db.get(Device, device_id)
+    if not device:
+        raise HTTPException(404, "Unknown device")
+    device.active = False
+    db.commit()
+    return {"id": device.id, "active": False}
+
+@app.post("/api/v1/telemetry", status_code=202)
+def ingest_telemetry(payload: TelemetryIn, x_device_token: str | None = Header(default=None), db: Session = Depends(get_db)):
+    device = db.get(Device, payload.device_id)
+    if not device or not device.active or not x_device_token or not compare_digest(device.token_hash, sha256(x_device_token.encode("utf-8")).hexdigest()):
+        raise HTTPException(401, "Valid active device credential required")
+    if device.bin_id != payload.bin_id:
+        raise HTTPException(403, "Device is not authorized for this bin")
     if not db.get(Bin, payload.bin_id):
         raise HTTPException(404, "Unknown bin")
     measured_at = _utc(payload.measured_at)
     if (measured_at - datetime.now(timezone.utc)).total_seconds() > settings.telemetry_future_skew_seconds:
         raise HTTPException(422, "Telemetry timestamp is too far in the future")
     row = Telemetry(**{**payload.model_dump(), "measured_at": measured_at}, source="live")
+    device.last_seen_at = datetime.now(timezone.utc)
     db.add(row)
     try:
         db.commit()
@@ -89,6 +130,10 @@ def ingest_telemetry(payload: TelemetryIn, db: Session = Depends(get_db)):
             same_payload = (existing.bin_id == payload.bin_id and existing.fill_percent == payload.fill_percent and _utc(existing.measured_at) == measured_at)
             if not same_payload:
                 raise HTTPException(409, "Message ID was already used with a different payload")
+            current_device = db.get(Device, payload.device_id)
+            if current_device:
+                current_device.last_seen_at = datetime.now(timezone.utc)
+                db.commit()
             return {"accepted": True, "duplicate": True, "telemetry_id": existing.id}
         raise HTTPException(409, "Telemetry could not be stored")
     db.refresh(row)
