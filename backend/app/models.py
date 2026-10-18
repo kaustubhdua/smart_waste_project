@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Float, DateTime, ForeignKey, UniqueConstraint, Integer, Text, Boolean
+from sqlalchemy import String, Float, DateTime, ForeignKey, UniqueConstraint, Integer, Text, Boolean, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
@@ -20,7 +20,10 @@ class Bin(Base):
 
 class Telemetry(Base):
     __tablename__ = "telemetry"
-    __table_args__ = (UniqueConstraint("device_id", "message_id", name="uq_device_message"),)
+    __table_args__ = (
+        UniqueConstraint("device_id", "message_id", name="uq_device_message"),
+        Index("ix_telemetry_bin_measured_at", "bin_id", "measured_at"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     bin_id: Mapped[str] = mapped_column(ForeignKey("bins.id"), index=True)
     device_id: Mapped[str] = mapped_column(String(100), index=True)

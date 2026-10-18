@@ -248,3 +248,32 @@ def test_cors_allows_driver_auth_headers():
     assert response.status_code == 200
     assert "x-driver-id" in response.headers.get("access-control-allow-headers", "").lower()
     assert "x-driver-token" in response.headers.get("access-control-allow-headers", "").lower()
+
+def test_operations_summary_uses_latest_telemetry_and_reports_real_sources():
+    bin_payload = {"id":"bin-summary","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}
+    assert client.post("/api/v1/bins", json=bin_payload, headers=OP).status_code == 201
+    device_headers = register_device("device-summary", "bin-summary")
+    event = {"bin_id":"bin-summary","device_id":"device-summary","message_id":"summary-1","fill_percent":40,"measured_at":datetime.now(timezone.utc).isoformat()}
+    assert client.post("/api/v1/telemetry", json=event, headers=device_headers).status_code == 202
+    summary = client.get("/api/v1/operations/summary", headers=OP)
+    assert summary.status_code == 200
+    body = summary.json()
+    assert body["active_bins"] == 1
+    assert body["bins_with_telemetry"] == 1
+    assert body["fresh_telemetry_bins"] == 1
+    assert body["stale_or_future_telemetry_bins"] == 0
+    assert body["jobs_by_status"]["detected"] == 0
+    assert body["data_is_simulated"] is False
+
+
+def test_device_revocation_supports_browser_cors_preflight():
+    response = client.options(
+        "/api/v1/devices/device-1",
+        headers={
+            "Origin": "http://localhost:8080",
+            "Access-Control-Request-Method": "DELETE",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert response.status_code == 200
+    assert "DELETE" in response.headers.get("access-control-allow-methods", "")
