@@ -4,6 +4,8 @@ on:
     paths:
       - "backend/**"
       - ".github/workflows/platform-api.yml"
+      - "web/**"
+      - "docker-compose.yml"
   pull_request:
     paths:
       - "backend/**"
@@ -12,6 +14,8 @@ on:
       - "person3_fuzzy_logic.py"
       - "app.py"
       - "tests/**"
+      - "web/**"
+      - "docker-compose.yml"
   workflow_dispatch:
 permissions:
   contents: read
