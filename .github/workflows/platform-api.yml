@@ -8,15 +8,24 @@ on:
     paths:
       - "backend/**"
       - ".github/workflows/platform-api.yml"
+      - "person2_ml_prediction.py"
+      - "person3_fuzzy_logic.py"
+      - "app.py"
+      - "tests/**"
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
+    env:
+      PYTHONPATH: ${{ github.workspace }}/backend
+      API_TOKEN: test-operator-token
+      DEVICE_TOKEN: test-device-token
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,5 +34,5 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
-      - run: API_TOKEN=test-operator-token DEVICE_TOKEN=test-device-token pytest -q
+      - run: pytest -q
       - run: python -m compileall -q app
