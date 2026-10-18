@@ -41,6 +41,18 @@ jobs:
       - name: Verify schema migration from an empty database
         run: DATABASE_URL=sqlite:///./migration_test.db alembic upgrade head
       - run: python -m compileall -q app
-      - name: Validate operator console JavaScript syntax
+      - name: Validate operator and driver browser JavaScript syntax
         working-directory: ${{ github.workspace }}
-        run: python -c "from pathlib import Path; import re; html=Path('web/index.html').read_text(); scripts=re.findall(r'<script>(.*?)</script>', html, re.S); assert scripts and any(s.strip() for s in scripts); Path('/tmp/operator-console.js').write_text('\\n'.join(scripts))" && node --check /tmp/operator-console.js
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          for name in ("index", "driver"):
+              html = Path(f"web/{name}.html").read_text()
+              scripts = [script for script in re.findall(r"<script>(.*?)</script>", html, re.S) if script.strip()]
+              assert scripts, f"No inline JavaScript found in web/{name}.html"
+              Path(f"/tmp/{name}.js").write_text("\n".join(scripts))
+          PY
+          node --check /tmp/index.js
+          node --check /tmp/driver.js
