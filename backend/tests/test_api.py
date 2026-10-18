@@ -44,7 +44,14 @@ def test_collection_job_state_machine_and_history():
     job_id = job_response.json()["id"]
     invalid = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"completed","actor":"dispatcher"}, headers=OP)
     assert invalid.status_code == 409
-    for status in ("approved", "assigned", "in_progress", "completed", "verified"):
+    for status in ("approved",):
+        response = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":status,"actor":"test-user"}, headers=OP)
+        assert response.status_code == 200
+    vehicle = {"id":"truck-state","capacity_liters":500,"depot_latitude":28.6,"depot_longitude":77.2}
+    assert client.post("/api/v1/vehicles", json=vehicle, headers=OP).status_code == 201
+    assigned = client.post(f"/api/v1/jobs/{job_id}/assign", json={"vehicle_id":"truck-state","actor":"dispatcher"}, headers=OP)
+    assert assigned.status_code == 200
+    for status in ("in_progress", "completed", "verified"):
         response = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":status,"actor":"test-user"}, headers=OP)
         assert response.status_code == 200
     assert client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"approved","actor":"test-user"}, headers=OP).status_code == 409
