@@ -1,5 +1,6 @@
 import joblib
 import pandas as pd
+from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
@@ -50,6 +51,14 @@ def train_ml_model(csv_path="cleaned_waste_data.csv"):
         raise ValueError("Unable to create chronological train/test split")
 
     print("Training Random Forest Regressor model...")
+    # A mean-only baseline helps show whether the model adds value beyond a
+    # constant prediction. These are synthetic-data holdout metrics, not field results.
+    baseline = DummyRegressor(strategy="mean")
+    baseline.fit(X_train, y_train)
+    baseline_predictions = baseline.predict(X_test)
+    baseline_mae = mean_absolute_error(y_test, baseline_predictions)
+    baseline_rmse = mean_squared_error(y_test, baseline_predictions) ** 0.5
+
     model = RandomForestRegressor(
         n_estimators=200,
         random_state=42,
@@ -59,11 +68,15 @@ def train_ml_model(csv_path="cleaned_waste_data.csv"):
 
     predictions = model.predict(X_test)
     mae = mean_absolute_error(y_test, predictions)
-    rmse = mean_squared_error(y_test, predictions, squared=False)
+    rmse = mean_squared_error(y_test, predictions) ** 0.5
 
-    print("Model Evaluation Results:")
-    print(f"   - Mean Absolute Error (MAE): {mae:.2f}%")
-    print(f"   - Root Mean Squared Error (RMSE): {rmse:.2f}%")
+    print("Chronological synthetic-data holdout evaluation (not field performance):")
+    print(f"   - Holdout rows: {len(X_test)}")
+    print(f"   - Mean baseline MAE: {baseline_mae:.2f} percentage points")
+    print(f"   - Mean baseline RMSE: {baseline_rmse:.2f} percentage points")
+    print(f"   - Random Forest MAE: {mae:.2f} percentage points")
+    print(f"   - Random Forest RMSE: {rmse:.2f} percentage points")
+    print(f"   - MAE improvement vs baseline: {baseline_mae - mae:.2f} percentage points")
 
     joblib.dump(model, MODEL_FILENAME)
     print(f"Successfully saved trained model to '{MODEL_FILENAME}'.")
