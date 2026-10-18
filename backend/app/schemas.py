@@ -18,6 +18,7 @@ class TelemetryIn(BaseModel):
     device_id: str = Field(min_length=1, max_length=100)
     message_id: str = Field(min_length=1, max_length=150)
     fill_percent: float = Field(ge=0, le=100)
+    temperature_c: float | None = Field(default=None, ge=-40, le=85)
     measured_at: datetime
 
     @field_validator("measured_at")

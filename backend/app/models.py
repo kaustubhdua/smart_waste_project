@@ -26,6 +26,7 @@ class Telemetry(Base):
     device_id: Mapped[str] = mapped_column(String(100), index=True)
     message_id: Mapped[str] = mapped_column(String(150))
     fill_percent: Mapped[float] = mapped_column(Float)
+    temperature_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     source: Mapped[str] = mapped_column(String(20), default="live")

@@ -9,5 +9,7 @@ class Settings(BaseSettings):
     auto_create_schema: bool = True
     telemetry_stale_after_minutes: int = 180
     telemetry_future_skew_seconds: int = 300
+    model_path: str = "../models/waste_model.pkl"
+    use_model_for_dispatch: bool = False
 
 settings = Settings()

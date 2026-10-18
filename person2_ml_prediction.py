@@ -1,4 +1,5 @@
 import joblib
+from pathlib import Path
 import pandas as pd
 from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import RandomForestRegressor
@@ -9,7 +10,7 @@ FEATURES = [
     "is_weekend", "fill_lag_1h", "fill_lag_3h", "rolling_mean_6h",
 ]
 TARGET = "next_fill_level_pct"
-MODEL_FILENAME = "waste_model.pkl"
+MODEL_FILENAME = "models/waste_model.pkl"
 
 
 def train_ml_model(csv_path="cleaned_waste_data.csv", model_path=MODEL_FILENAME):
@@ -54,6 +55,7 @@ def train_ml_model(csv_path="cleaned_waste_data.csv", model_path=MODEL_FILENAME)
         "random_forest_rmse": float(mean_squared_error(y_test, predictions) ** 0.5),
         "evaluation_note": "Chronological holdout only; synthetic data is not evidence of field performance.",
     }
+    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"model": model, "features": FEATURES, "metrics": metrics, "target": TARGET}, model_path)
     print("Chronological holdout metrics (not field performance):")
     for key, value in metrics.items():
