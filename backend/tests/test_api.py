@@ -222,3 +222,9 @@ def test_forecast_endpoint_uses_loaded_artifact_and_real_history(monkeypatch):
     assert response.status_code == 200, response.text
     assert response.json()["predictions"][0]["predicted_next_fill_percent"] == 67.5
     assert response.json()["forecast_semantics"].startswith("next observed fill")
+
+def test_job_demand_cannot_exceed_bin_capacity():
+    b = {"id":"bin-capacity","latitude":28.6,"longitude":77.2,"capacity_liters":100,"criticality":2,"source":"demo"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    response = client.post("/api/v1/jobs", json={"bin_id":"bin-capacity","demand_liters":101}, headers=OP)
+    assert response.status_code == 422

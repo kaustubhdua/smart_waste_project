@@ -63,6 +63,9 @@ def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
     rows.reverse()
     if len(rows) < 3:
         return None, "insufficient_history"
+    intervals_minutes = [(_utc(rows[i].measured_at) - _utc(rows[i - 1].measured_at)).total_seconds() / 60 for i in range(1, len(rows))]
+    if any(interval < 30 or interval > 90 for interval in intervals_minutes[-2:]):
+        return None, "history_cadence_mismatch"
     latest = rows[-1]
     if _is_stale(latest.measured_at):
         return None, "stale_telemetry"
@@ -299,6 +302,8 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
         demand = bin_row.capacity_liters * demand_fill / 100
     else:
         demand_source = "operator_supplied"
+    if demand > bin_row.capacity_liters:
+        raise HTTPException(422, "Collection demand cannot exceed the registered bin capacity")
     fill_for_priority = (demand * 100 / bin_row.capacity_liters) if demand_source == "model_next_observation" else (latest.fill_percent if latest is not None and not _is_stale(latest.measured_at) else 0.0)
     priority = payload.priority if payload.priority is not None else _priority_score(fill_for_priority, bin_row)
     job = CollectionJob(id=str(uuid4()), bin_id=payload.bin_id, demand_liters=demand, priority=priority)
@@ -356,7 +361,7 @@ def operations_summary(db: Session = Depends(get_db)):
         "jobs_by_status": {status: sum(1 for job in jobs if job.status == status) for status in ALLOWED},
         "vehicles_active": sum(1 for v in db.scalars(select(Vehicle)) if v.active),
         "telemetry_stale_after_minutes": settings.telemetry_stale_after_minutes,
-        "data_is_simulated": all(b.source == "demo" for b in bin_rows) if bin_rows else False,
+        "data_is_simulated": bool(bin_rows) and all(b.source == "demo" for b in bin_rows) and not telemetry_rows,
     }
 
 @app.post("/api/v1/vehicles", dependencies=[Depends(require_operator)], status_code=201)
@@ -548,6 +553,8 @@ async def dispatch_approved_jobs(payload: DispatchRequest, db: Session = Depends
         latest = db.scalar(select(Telemetry).where(Telemetry.bin_id == job.bin_id).order_by(Telemetry.measured_at.desc()).limit(1))
         if not bin_row or not bin_row.active:
             raise HTTPException(422, f"Bin for job {job_id} is inactive")
+        if job.demand_liters > bin_row.capacity_liters:
+            raise HTTPException(422, f"Job {job_id} demand exceeds its bin capacity")
         if latest is None or _is_stale(latest.measured_at):
             raise HTTPException(422, f"Fresh telemetry is required for job {job_id}")
         jobs.append(job)
