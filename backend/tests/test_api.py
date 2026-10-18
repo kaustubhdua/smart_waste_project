@@ -1,0 +1,37 @@
+import os
+from fastapi.testclient import TestClient
+
+os.environ["DATABASE_URL"] = "sqlite:///./test_smart_waste.db"
+os.environ["API_TOKEN"] = "test-operator-token"
+os.environ["DEVICE_TOKEN"] = "test-device-token"
+
+from app.main import app
+from app.db import Base, engine
+
+client = TestClient(app)
+OP = {"Authorization": "Bearer test-operator-token"}
+DEVICE = {"X-Device-Token": "test-device-token"}
+
+def setup_function():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+def test_health_is_public():
+    assert client.get("/health").json()["status"] == "ok"
+
+def test_operator_token_required():
+    assert client.get("/api/v1/bins").status_code == 401
+
+def test_bin_and_idempotent_telemetry():
+    b = {"id":"bin-test","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    event = {"bin_id":"bin-test","device_id":"device-1","message_id":"m-1","fill_percent":45,"measured_at":"2026-01-01T10:00:00Z"}
+    first = client.post("/api/v1/telemetry", json=event, headers=DEVICE)
+    second = client.post("/api/v1/telemetry", json=event, headers=DEVICE)
+    assert first.status_code == 202 and first.json()["duplicate"] is False
+    assert second.status_code == 202 and second.json()["duplicate"] is True
+    assert len(client.get("/api/v1/bins/bin-test/history", headers=OP).json()) == 1
+
+def test_invalid_fill_rejected():
+    event = {"bin_id":"missing","device_id":"d","message_id":"m","fill_percent":101,"measured_at":"2026-01-01T10:00:00Z"}
+    assert client.post("/api/v1/telemetry", json=event, headers=DEVICE).status_code == 422
