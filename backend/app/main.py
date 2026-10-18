@@ -1,18 +1,18 @@
 from datetime import datetime, timezone
-from hashlib import sha256
 from hmac import compare_digest
 from uuid import uuid4
-from fastapi import FastAPI, Depends, Header, HTTPException, status
+from fastapi import FastAPI, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .config import settings
 from .db import Base, engine, get_db
-from .models import Bin, Telemetry, CollectionJob, ServiceEvent, Vehicle
+from .models import Bin, Telemetry, CollectionJob, ServiceEvent
 from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest
-from .routing import road_route, RoutingError
+from .routing import road_route, road_matrix, RoutingError
+from .optimizer import optimize_cvrp, OptimizationError
 
-app = FastAPI(title="Smart Waste Operations API", version="1.0.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
+app = FastAPI(title="Smart Waste Operations API", version="1.1.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
 Base.metadata.create_all(bind=engine)
 
 def require_operator(authorization: str | None = Header(default=None)):
@@ -109,6 +109,42 @@ def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get
     db.add(ServiceEvent(job_id=job.id, actor=payload.actor, previous_status=previous, new_status=payload.status, note=payload.note))
     db.commit()
     return {"id": job.id, "previous_status": previous, "status": job.status}
+
+@app.post("/api/v1/routes/optimize", dependencies=[Depends(require_operator)])
+async def optimize_route(payload: RouteRequest, db: Session = Depends(get_db)):
+    bins = []
+    for bin_id in payload.bin_ids:
+        row = db.get(Bin, bin_id)
+        if not row or not row.active:
+            raise HTTPException(404, f"Unknown or inactive bin: {bin_id}")
+        bins.append(row)
+    coords = [(payload.depot_latitude, payload.depot_longitude)] + [(b.latitude, b.longitude) for b in bins]
+    demands = [0.0]
+    for row in bins:
+        latest = db.scalar(select(Telemetry).where(Telemetry.bin_id == row.id).order_by(Telemetry.measured_at.desc()).limit(1))
+        if latest is None:
+            raise HTTPException(422, f"Missing telemetry for bin {row.id}; demand cannot be estimated")
+        demands.append(row.capacity_liters * latest.fill_percent / 100)
+    capacities = [payload.vehicle_capacity_liters] * payload.num_vehicles
+    try:
+        matrix = await road_matrix(coords)
+        optimized = optimize_cvrp(matrix["distances_meters"], demands, capacities)
+        route_details = []
+        for route in optimized["routes"]:
+            ordered_nodes = [0] + route["stop_indices"] + [0]
+            ordered_coords = [coords[i] for i in ordered_nodes]
+            geometry = await road_route(ordered_coords) if route["stop_indices"] else {"distance_meters": 0, "duration_seconds": 0, "geometry": None}
+            route_details.append({
+                **route,
+                "ordered_bin_ids": [bins[i - 1].id for i in route["stop_indices"]],
+                "road_duration_seconds": geometry["duration_seconds"],
+                "geometry": geometry["geometry"],
+            })
+    except RoutingError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except (OptimizationError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": "OSRM", "solver": optimized["solver"], "data_mode": "telemetry-derived demand; verify sensor calibration before operational use"}
 
 @app.post("/api/v1/routes/preview", dependencies=[Depends(require_operator)])
 async def preview_route(payload: RouteRequest, db: Session = Depends(get_db)):

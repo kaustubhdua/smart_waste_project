@@ -33,5 +33,6 @@ class TransitionIn(BaseModel):
 class RouteRequest(BaseModel):
     depot_latitude: float = Field(ge=-90, le=90)
     depot_longitude: float = Field(ge=-180, le=180)
-    bin_ids: list[str] = Field(min_length=1, max_length=100)
+    bin_ids: list[str] = Field(min_length=1, max_length=50)
     vehicle_capacity_liters: float = Field(gt=0)
+    num_vehicles: int = Field(default=1, ge=1, le=20)

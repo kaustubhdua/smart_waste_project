@@ -29,12 +29,8 @@ The API defaults to a local SQLite database for development. Docker Compose conf
 3. Inspect readings using `GET /api/v1/bins/{bin_id}/history`.
 4. Create a collection candidate with `POST /api/v1/jobs`.
 5. Move a job through validated transitions using `POST /api/v1/jobs/{job_id}/transitions`.
-6. Request a road-route preview using `POST /api/v1/routes/preview`. This obtains road distance/time/geometry from OSRM and deliberately fails if routing is unavailable. It does not claim to optimize stop order.
+6. Optimize a route with `POST /api/v1/routes/optimize`. This obtains a road-distance matrix from OSRM and uses OR-Tools to assign stops across capacity-constrained vehicles.
 
 ## Data truthfulness
 
-Every bin has a `source` of `live`, `imported`, or `demo`. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. The route preview is road-based, but caller-supplied stop ordering is not a vehicle-routing solution. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.
-
-## Original application
-
-The original Streamlit app and ML/OR-Tools modules remain in place. They should only be described as production-ready after model serving, leakage-safe evaluation, road-matrix optimization, frontend integration, migrations, user/role identity, end-to-end tests and a real-data pilot are complete.
+Every bin has a `source` of `live`, `imported`, or `demo`. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. Routing uses real road-network distance/time data; if the provider fails, the API returns an error rather than fabricating distances. Forecasts are not yet served by the API and no field-performance claims are made. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.

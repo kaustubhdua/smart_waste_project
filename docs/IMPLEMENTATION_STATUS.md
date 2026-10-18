@@ -1,22 +1,20 @@
 # Implementation status and honest limitations
 
-## Added in this change
+## Implemented in this branch
+- FastAPI service with separate operator/device shared-token gates.
+- SQLAlchemy persistence for bins, telemetry, collection jobs, vehicles and service events.
+- Validated telemetry ingestion with idempotency for duplicate device messages.
+- Explicit collection-job state transitions and service-event history.
+- OSRM road distance/time matrix and route geometry integration.
+- OR-Tools capacitated vehicle routing over the OSRM road-distance matrix.
+- Docker Compose for PostgreSQL/PostGIS and the API, environment template, API/optimizer tests and CI workflow.
 
-- FastAPI service with operator/device bearer-token gates.
-- SQLAlchemy persistence for bins, telemetry, vehicles, collection jobs and service events.
-- Validated telemetry ingestion with device/message idempotency.
-- Collection job creation and explicit state-transition validation.
-- OSRM road-route preview with real distance, duration and geometry; routing failure returns an error instead of inventing straight-line road distance.
-- Docker Compose for PostgreSQL/PostGIS and the API.
-- API tests and a basic health endpoint.
-
-## Not yet production-complete
-
-- The route preview uses the stop order supplied by the caller; it does **not** solve a vehicle-routing optimization problem. The existing OR-Tools implementation still needs integration with a road-distance matrix and persisted route plans.
-- Authentication is a shared-token MVP, not multi-user identity, password login, OAuth, or granular per-role authorization. Rotate tokens and put the API behind TLS; do not expose demo tokens.
+## Still required before production
+- Route plans are returned but not yet persisted as versioned route/stop records; add route plan tables and transactional assignment to vehicles/jobs.
+- Authentication is a shared-token MVP, not multi-user identity, password login, OAuth or granular RBAC. Rotate tokens and put the API behind TLS; do not expose demo tokens.
 - ORM table creation is for development bootstrap. Production deployment must use Alembic migrations and a reviewed migration workflow.
 - The public OSRM endpoint is a demonstration dependency with usage limits and no service guarantee. Production should use a self-hosted or contracted routing provider.
-- The current ML model is not wired into this API, and no model performance claims are made. Add scheduled model artifacts, leakage-safe evaluation and a persistence baseline before using forecasts for operations.
+- The existing ML model is not wired into the API. Add versioned artifacts, scheduled predictions, leakage-safe evaluation and persistence/seasonal baselines before using forecasts operationally.
+- The existing Streamlit UI is not yet connected to this API or replaced by a driver/dispatcher experience.
 - No physical sensor has been tested. Live telemetry requires a device to send authenticated, calibrated readings.
-- The original Streamlit UI is not yet replaced by a production React driver/dispatcher experience.
-- Tests have been authored but must be run in CI; a repository write is not evidence that tests passed.
+- Tests must pass in CI; a repository write is not evidence that tests passed.
