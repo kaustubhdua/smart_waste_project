@@ -35,3 +35,16 @@ def test_bin_and_idempotent_telemetry():
 def test_invalid_fill_rejected():
     event = {"bin_id":"missing","device_id":"d","message_id":"m","fill_percent":101,"measured_at":"2026-01-01T10:00:00Z"}
     assert client.post("/api/v1/telemetry", json=event, headers=DEVICE).status_code == 422
+
+def test_collection_job_state_machine_and_history():
+    b = {"id":"bin-job","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    job_response = client.post("/api/v1/jobs", json={"bin_id":"bin-job","demand_liters":120,"priority":55}, headers=OP)
+    assert job_response.status_code == 201
+    job_id = job_response.json()["id"]
+    invalid = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"completed","actor":"dispatcher"}, headers=OP)
+    assert invalid.status_code == 409
+    for status in ("approved", "assigned", "in_progress", "completed", "verified"):
+        response = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":status,"actor":"test-user"}, headers=OP)
+        assert response.status_code == 200
+    assert client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"approved","actor":"test-user"}, headers=OP).status_code == 409
