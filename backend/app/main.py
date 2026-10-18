@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
+import csv
+import io
 from math import exp
 import json
 from hmac import compare_digest
 from hashlib import sha256
 from secrets import token_urlsafe
 from uuid import uuid4
-from fastapi import FastAPI, Depends, Header, HTTPException
+from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -138,6 +140,63 @@ def ingest_telemetry(payload: TelemetryIn, x_device_token: str | None = Header(d
         raise HTTPException(409, "Telemetry could not be stored")
     db.refresh(row)
     return {"accepted": True, "duplicate": False, "telemetry_id": row.id}
+
+@app.post("/api/v1/telemetry/import-csv", dependencies=[Depends(require_operator)])
+async def import_telemetry_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Import validated historical telemetry; the entire file is accepted or rejected as one batch."""
+    if file.filename and not file.filename.lower().endswith(".csv"):
+        raise HTTPException(415, "Upload a .csv file")
+    raw = await file.read(2_000_001)
+    if len(raw) > 2_000_000:
+        raise HTTPException(413, "CSV upload exceeds the 2 MB limit")
+    try:
+        reader = csv.DictReader(io.StringIO(raw.decode("utf-8-sig")))
+        required = {"bin_id", "device_id", "message_id", "fill_percent", "measured_at"}
+        if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+            raise HTTPException(422, detail={"message": "CSV is missing required columns", "required_columns": sorted(required)})
+        pending, seen = [], {}
+        duplicates = 0
+        for row_number, raw_row in enumerate(reader, start=2):
+            if row_number > 10001:
+                raise HTTPException(413, "CSV exceeds the 10,000-row limit")
+            try:
+                event = TelemetryIn.model_validate(raw_row)
+            except Exception as exc:
+                raise HTTPException(422, detail={"row": row_number, "message": "Invalid telemetry row", "reason": str(exc)}) from exc
+            if not db.get(Bin, event.bin_id):
+                raise HTTPException(422, detail={"row": row_number, "message": f"Unknown bin: {event.bin_id}"})
+            measured_at = _utc(event.measured_at)
+            if (measured_at - datetime.now(timezone.utc)).total_seconds() > settings.telemetry_future_skew_seconds:
+                raise HTTPException(422, detail={"row": row_number, "message": "Timestamp is too far in the future"})
+            key = (event.device_id, event.message_id)
+            signature = (event.bin_id, event.fill_percent, measured_at)
+            if key in seen:
+                if seen[key] != signature:
+                    raise HTTPException(409, detail={"row": row_number, "message": "Message ID reused with a different payload in this file"})
+                duplicates += 1
+                continue
+            seen[key] = signature
+            existing = db.scalar(select(Telemetry).where(Telemetry.device_id == event.device_id, Telemetry.message_id == event.message_id))
+            if existing:
+                existing_signature = (existing.bin_id, existing.fill_percent, _utc(existing.measured_at))
+                if existing_signature != signature:
+                    raise HTTPException(409, detail={"row": row_number, "message": "Message ID already exists with a different payload"})
+                duplicates += 1
+                continue
+            pending.append(Telemetry(**{**event.model_dump(), "measured_at": measured_at}, source="imported"))
+        if not pending and duplicates == 0:
+            raise HTTPException(422, "CSV contains no telemetry rows")
+        db.add_all(pending)
+        db.commit()
+    except UnicodeDecodeError as exc:
+        raise HTTPException(422, "CSV must be UTF-8 encoded") from exc
+    except csv.Error as exc:
+        db.rollback()
+        raise HTTPException(422, "Malformed CSV file") from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Telemetry batch conflicted with concurrent writes; retry after refreshing data") from exc
+    return {"accepted": len(pending), "duplicates_skipped": duplicates, "source": "imported"}
 
 @app.get("/api/v1/bins/{bin_id}/history", dependencies=[Depends(require_operator)])
 def bin_history(bin_id: str, limit: int = 100, db: Session = Depends(get_db)):

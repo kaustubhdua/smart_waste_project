@@ -169,3 +169,21 @@ def test_device_credentials_are_scoped_revocable_and_rotatable():
     rotated = client.post("/api/v1/devices/scoped-device/rotate-token", headers=OP)
     assert rotated.status_code == 200
     assert client.post("/api/v1/telemetry", json=event, headers={"X-Device-Token":rotated.json()["token"]}).status_code == 202
+
+def test_csv_import_is_validated_idempotent_and_labeled_imported():
+    b = {"id":"bin-import","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"imported"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    csv_body = "bin_id,device_id,message_id,fill_percent,measured_at\nbin-import,dataset-1,row-1,42,2026-10-18T10:00:00Z\n"
+    first = client.post("/api/v1/telemetry/import-csv", files={"file":("readings.csv",csv_body,"text/csv")}, headers=OP)
+    assert first.status_code == 200, first.text
+    assert first.json()["accepted"] == 1
+    second = client.post("/api/v1/telemetry/import-csv", files={"file":("readings.csv",csv_body,"text/csv")}, headers=OP)
+    assert second.status_code == 200
+    assert second.json()["duplicates_skipped"] == 1
+    history = client.get("/api/v1/bins/bin-import/history", headers=OP).json()
+    assert len(history) == 1 and history[0]["source"] == "imported"
+
+def test_csv_import_rejects_unknown_bins_without_partial_commit():
+    csv_body = "bin_id,device_id,message_id,fill_percent,measured_at\nmissing,dataset-1,row-1,42,2026-10-18T10:00:00Z\n"
+    response = client.post("/api/v1/telemetry/import-csv", files={"file":("readings.csv",csv_body,"text/csv")}, headers=OP)
+    assert response.status_code == 422
