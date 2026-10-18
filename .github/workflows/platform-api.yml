@@ -59,6 +59,28 @@ jobs:
       - name: Build API and web containers
         working-directory: ${{ github.workspace }}
         run: POSTGRES_PASSWORD=ci-only-password API_TOKEN=ci-only-operator-token docker compose build
+      - name: Smoke test the running Compose stack
+        working-directory: ${{ github.workspace }}
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          API_TOKEN: ci-only-operator-token
+          APP_ENV: development
+          SEED_DEMO_DATA: "true"
+          AUTO_CREATE_SCHEMA: "false"
+        run: |
+          docker compose up -d --wait --wait-timeout 180
+          curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
+          curl --fail --silent --show-error http://127.0.0.1:8080/ > /dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8080/driver.html > /dev/null
+          curl --fail --silent --show-error -H "Authorization: Bearer ci-only-operator-token" http://127.0.0.1:8000/api/v1/operations/summary
+      - name: Tear down Compose stack
+        if: always()
+        working-directory: ${{ github.workspace }}
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          API_TOKEN: ci-only-operator-token
+        run: docker compose down --volumes --remove-orphans
+
       - name: Validate operator and driver browser JavaScript syntax
         working-directory: ${{ github.workspace }}
         run: |
