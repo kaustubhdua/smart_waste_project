@@ -371,12 +371,12 @@ def create_vehicle(payload: VehicleCreate, db: Session = Depends(get_db)):
     vehicle = Vehicle(**payload.model_dump())
     db.add(vehicle)
     db.commit()
-    return {"id": vehicle.id, "capacity_liters": vehicle.capacity_liters, "active": vehicle.active}
+    return {"id": vehicle.id, "capacity_liters": vehicle.capacity_liters, "active": vehicle.active, "available": vehicle.available}
 
 @app.get("/api/v1/vehicles", dependencies=[Depends(require_operator)])
 def list_vehicles(db: Session = Depends(get_db)):
     rows = db.scalars(select(Vehicle).order_by(Vehicle.id))
-    return [{"id": v.id, "capacity_liters": v.capacity_liters, "active": v.active, "depot_latitude": v.depot_latitude, "depot_longitude": v.depot_longitude} for v in rows]
+    return [{"id": v.id, "capacity_liters": v.capacity_liters, "active": v.active, "available": v.available, "depot_latitude": v.depot_latitude, "depot_longitude": v.depot_longitude} for v in rows]
 
 @app.post("/api/v1/jobs/{job_id}/assign", dependencies=[Depends(require_operator)])
 def assign_job(job_id: str, payload: JobAssign, db: Session = Depends(get_db)):
@@ -386,6 +386,8 @@ def assign_job(job_id: str, payload: JobAssign, db: Session = Depends(get_db)):
         raise HTTPException(404, "Unknown job")
     if not vehicle or not vehicle.active:
         raise HTTPException(404, "Unknown or inactive vehicle")
+    if not vehicle.available:
+        raise HTTPException(409, "Vehicle is already assigned to an active route")
     if job.status not in {"detected", "approved", "exception"}:
         raise HTTPException(409, f"Job cannot be assigned from status {job.status}")
     if job.demand_liters > vehicle.capacity_liters:
@@ -393,6 +395,7 @@ def assign_job(job_id: str, payload: JobAssign, db: Session = Depends(get_db)):
     previous = job.status
     job.status = "assigned"
     job.assigned_vehicle_id = vehicle.id
+    vehicle.available = False
     db.add(ServiceEvent(job_id=job.id, actor=payload.actor, previous_status=previous, new_status="assigned", note="Assigned to vehicle " + vehicle.id))
     db.commit()
     return {"id": job.id, "status": job.status, "assigned_vehicle_id": job.assigned_vehicle_id}
@@ -412,6 +415,16 @@ def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get
         bin_row = db.get(Bin, job.bin_id)
         if bin_row:
             bin_row.last_emptied_at = datetime.now(timezone.utc)
+        if job.assigned_vehicle_id:
+            vehicle = db.get(Vehicle, job.assigned_vehicle_id)
+            if vehicle:
+                active_jobs = db.scalar(select(CollectionJob.id).where(CollectionJob.assigned_vehicle_id == vehicle.id, CollectionJob.id != job.id, CollectionJob.status.in_(["assigned", "in_progress", "completed"])).limit(1))
+                if active_jobs is None:
+                    vehicle.available = True
+    if payload.status == "exception" and job.assigned_vehicle_id:
+        vehicle = db.get(Vehicle, job.assigned_vehicle_id)
+        if vehicle:
+            vehicle.available = True
     db.add(ServiceEvent(job_id=job.id, actor=payload.actor, previous_status=previous, new_status=payload.status, note=payload.note))
     db.commit()
     return {"id": job.id, "previous_status": previous, "status": job.status}
@@ -530,6 +543,10 @@ def driver_transition(job_id: str, payload: DriverTransition, x_driver_id: str |
         bin_row = db.get(Bin, job.bin_id)
         if bin_row:
             bin_row.last_emptied_at = datetime.now(timezone.utc)
+    if payload.status == "exception":
+        vehicle = db.get(Vehicle, driver.vehicle_id)
+        if vehicle:
+            vehicle.available = True
     db.add(ServiceEvent(job_id=job.id, actor="driver:" + driver.id, previous_status=previous, new_status=payload.status, note=payload.note))
     db.commit()
     return {"id": job.id, "previous_status": previous, "status": job.status}
@@ -559,9 +576,9 @@ async def dispatch_approved_jobs(payload: DispatchRequest, db: Session = Depends
             raise HTTPException(422, f"Fresh telemetry is required for job {job_id}")
         jobs.append(job)
         bins.append(bin_row)
-    vehicle_query = select(Vehicle).where(Vehicle.active.is_(True)).order_by(Vehicle.id)
+    vehicle_query = select(Vehicle).where(Vehicle.active.is_(True), Vehicle.available.is_(True)).order_by(Vehicle.id).with_for_update()
     if payload.vehicle_ids:
-        vehicle_query = select(Vehicle).where(Vehicle.active.is_(True), Vehicle.id.in_(payload.vehicle_ids)).order_by(Vehicle.id)
+        vehicle_query = select(Vehicle).where(Vehicle.active.is_(True), Vehicle.available.is_(True), Vehicle.id.in_(payload.vehicle_ids)).order_by(Vehicle.id).with_for_update()
     vehicles = list(db.scalars(vehicle_query))
     if payload.vehicle_ids and len(vehicles) != len(payload.vehicle_ids):
         raise HTTPException(422, "One or more requested vehicles do not exist or are inactive")
@@ -580,6 +597,8 @@ async def dispatch_approved_jobs(payload: DispatchRequest, db: Session = Depends
         assigned_job_ids = set()
         for route in optimized["routes"]:
             vehicle = vehicles[route["vehicle_index"]]
+            if route["stop_indices"]:
+                vehicle.available = False
             ordered_nodes = [0] + route["stop_indices"] + [0]
             ordered_coords = [coords[i] for i in ordered_nodes]
             geometry = await road_route(ordered_coords) if route["stop_indices"] else {"distance_meters": 0, "duration_seconds": 0, "geometry": None}

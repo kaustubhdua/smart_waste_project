@@ -38,6 +38,7 @@ class Vehicle(Base):
     depot_latitude: Mapped[float] = mapped_column(Float)
     depot_longitude: Mapped[float] = mapped_column(Float)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    available: Mapped[bool] = mapped_column(Boolean, default=True)
 
 class CollectionJob(Base):
     __tablename__ = "collection_jobs"
