@@ -57,7 +57,7 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
 
 ## Main capabilities
 
-- **Telemetry:** validated readings, device token gate, and duplicate-message idempotency.
+- **Telemetry:** validated live readings with per-device credentials, scoped access, freshness checks and duplicate-message idempotency.
 - **Data integrity:** persistent bins, collection jobs, service events, route plans, and schema migration.
 - **Prediction:** trained model artifact, inference helper, chronological holdout, mean baseline and last-observation baseline.
 - **Priority:** deterministic bounded weighted heuristic. It is not mislabeled as a true fuzzy-inference engine.
@@ -74,7 +74,7 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
     # API and routing optimizer
     cd backend
     pip install -r requirements.txt
-    PYTHONPATH=. API_TOKEN=test-operator-token DEVICE_TOKEN=test-device-token pytest -q
+    PYTHONPATH=. API_TOKEN=test-operator-token pytest -q
 
 ## API overview
 
@@ -101,7 +101,7 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
 
 - Shared bearer tokens are a development authentication mechanism, not multi-user login or role-based authorization.
 - The public OSRM endpoint has usage limits and no production service guarantee.
-- Route plans are persisted, but assignment to named drivers and vehicles is not yet a complete dispatch workflow.
+- Dispatch is available for approved jobs and registered vehicles; named drivers have vehicle-scoped credentials and an online mobile workflow. Offline actions and turn-by-turn navigation are not implemented.
 - The ML pipeline has not been validated against real sensor data and is not yet served by the API.
 - No physical sensor, calibration process, municipal pilot, or real operational savings claim has been validated.
 - Use production-grade secret management, TLS, backups, monitoring, threat modeling, and a reviewed migration process before exposing the service publicly.

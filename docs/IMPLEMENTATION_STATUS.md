@@ -8,12 +8,12 @@
 - Operations summary for telemetry freshness, bin counts, active vehicles and job-state counts.
 - Collection job listing, service-event history, explicit state transitions and capacity-checked vehicle assignment.
 - Dispatch endpoint optimizes approved jobs against registered vehicle capacities, persists the route plan, and assigns each job with an audit event in one database transaction.
-- Database readiness probe and placeholder-token rejection.\n- Dispatch endpoint optimizes approved jobs against registered vehicle capacities, persists the route plan, and assigns each job with an audit event in one database transaction.\n- Database readiness probe and placeholder-token rejection.
+- Database readiness probe and placeholder-token rejection.
 - OSRM road distance/time matrix and route geometry integration.
 - OR-Tools capacitated vehicle routing over road-network distances with finite input validation.
 - Route optimization results persisted as route-plan records and retrievable from history.
-- Alembic initial schema migration and a follow-up device-credential migration.
-- Model training separated from dashboard startup, model artifact loading/inference, and mean/persistence baseline metrics.
+- Alembic migrations for the initial schema, device credentials and driver credentials.
+- Model training separated from dashboard startup, model artifact loading/inference, and mean/persistence baseline metrics.\n- Historical telemetry CSV import validates required fields, row limits, timestamp semantics, duplicate keys and bin references before batch commit.
 - Priority engine accurately described as a deterministic weighted heuristic; service time is not fabricated when collection history is absent.
 - Responsive operator console served by Nginx, connected to API bin records, telemetry history, device enrollment, job creation/approval, vehicle registration and route dispatch.
 - Online mobile driver view with vehicle-scoped jobs, navigation handoff, start/complete/exception actions and driver credential enrollment.

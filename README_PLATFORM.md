@@ -17,7 +17,7 @@ cd backend
 python -m venv .venv
 # Activate the virtual environment, then:
 pip install -r requirements.txt
-API_TOKEN=test-operator-token DEVICE_TOKEN=test-device-token pytest -q
+API_TOKEN=test-operator-token pytest -q
 ```
 
 The API defaults to a local SQLite database for development. Docker Compose configures PostgreSQL/PostGIS. Alembic migrations are applied automatically by the API container. Use a managed secret store before production.
