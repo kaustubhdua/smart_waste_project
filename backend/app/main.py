@@ -1,4 +1,5 @@
-from datetime import datetime, timezone\nimport json
+from datetime import datetime, timezone
+import json
 from hmac import compare_digest
 from uuid import uuid4
 from fastapi import FastAPI, Depends, Header, HTTPException
