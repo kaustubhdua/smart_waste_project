@@ -7,3 +7,12 @@ venv/
 .streamlit/
 *.pkl
 cleaned_waste_data.csv
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+.pytest_cache/
+.coverage
+htmlcov/

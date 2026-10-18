@@ -1,64 +1,102 @@
-# Smart Waste Collection & Route Optimisation
+# Smart Waste Collection & Fleet Optimization
 
-<p align="center"><strong>Prediction → priority → routing</strong><br/>An end-to-end decision pipeline connecting machine-learning forecasts to vehicle-routing decisions.</p>
+<p align="center"><strong>Observe → forecast → prioritize → optimize → collect</strong></p>
 
-> **Status:** engineering prototype using synthetic IoT-style data. This demonstrates the decision pipeline; it is not evidence of a live municipal deployment.
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white">
+  <img alt="Routing" src="https://img.shields.io/badge/Routing-OR--Tools-4285F4">
+  <img alt="Database" src="https://img.shields.io/badge/Database-PostgreSQL%20%2B%20PostGIS-4169E1?logo=postgresql&logoColor=white">
+  <img alt="Status" src="https://img.shields.io/badge/Status-Engineering%20prototype-orange">
+</p>
 
-## Engineering snapshot
+A waste-collection engineering project combining time-series feature engineering, fill-level prediction, collection-priority scoring, capacity-constrained vehicle routing, telemetry ingestion, persistent service history, and a map-based operator console.
 
-**Problem:** collection decisions need to connect predicted bin state with operational urgency and vehicle constraints.
+> **Honest status:** this is an engineering prototype, not a proven municipal deployment. Synthetic/demo records are not live sensor readings. Hardware calibration, identity-based role permissions, field evaluation, and production operations still require real-world validation.
 
-**Pipeline:** IoT-style time series → feature engineering → Random Forest prediction → continuous priority scoring → Google OR-Tools routing → Streamlit/Folium decision surface.
+## Two ways to run it
 
-**Technical proof:** time-series features · Random Forest regression · 0–100 priority scoring · CVRP optimisation · geospatial dashboard.
+### 1. Full-stack API + operator console
 
-## Evaluation contract
+The platform foundation lives in the backend and web directories. It includes FastAPI, PostgreSQL/PostGIS, telemetry persistence, job lifecycle events, OSRM road-network costs, OR-Tools route optimization, Alembic schema migrations, and an API-connected operator console.
 
-Run the app's model evaluation in an environment with the dependencies from `requirements.txt` installed:
+1. Copy .env.example to .env.
+2. Replace all placeholder secrets with unique random values.
+3. Start the services:
 
-~~~bash
-python person2_ml_prediction.py
-~~~
+    docker compose up --build
 
-The training script now reports a chronological holdout comparison against a mean-only baseline (MAE and RMSE). These values are for generated/synthetic data and one temporal split only; they are not field accuracy, operational savings, or evidence that a deployed collection service improved. Record the dataset-generation seed and exact run when publishing results. For a stronger evaluation, reserve later dates and unseen bins, repeat across multiple seeds, and compare against a last-observation baseline before interpreting model performance.
+4. Open the operator console at http://localhost:8080, API docs at http://localhost:8000/docs, and health check at http://localhost:8000/health.
 
-## Why the pipeline matters
+Enter the configured API_TOKEN in the operator console. For a real device, send authenticated readings to POST /api/v1/telemetry with X-Device-Token, a registered bin_id, a unique message_id, calibrated fill_percent, and an ISO timestamp. The UI does not invent missing telemetry.
 
-The project deliberately connects stages that are often presented as separate demos: model output becomes a prioritisation signal, prioritisation becomes an optimisation input, and the resulting route is exposed for inspection.
+Route optimization uses the OSRM road-distance matrix and OR-Tools capacity constraints. The public OSRM endpoint is only suitable for development; use a contracted or self-hosted routing provider for a deployed service.
 
-## Boundaries
+### 2. Legacy Streamlit / ML demonstration
 
-The data is synthetic and the routing environment is simulated. Model accuracy, route quality and operational savings should therefore be evaluated as engineering experiments rather than real-world impact.
+Install the pinned root requirements and launch:
 
----
+    python -m venv .venv
+    # Activate the environment
+    pip install -r requirements.txt
+    streamlit run app.py
 
-# 🗑️ Smart Waste Collection & Route Optimization System<img width="1897" height="866" alt="Screenshot 2026-07-22 040317" src="https://github.com/user-attachments/assets/44c32438-619c-4c95-aef4-2af907966abf" />
+The Streamlit route solver remains a legacy demonstration that uses approximate coordinate costs; the backend route optimizer is the road-network implementation. The ML model is trained separately using python person2_ml_prediction.py or from the dashboard control. Its target is the next observed fill value, not a validated six- or twelve-hour forecast.
 
+## Architecture
 
-An end-to-end, AI-powered waste management pipeline designed to monitor IoT-enabled bins, predict fill levels, score collection priorities using continuous logic, and optimise collection truck routes using Google OR-Tools.
+    Operator console (web/) ──┐
+                              ├── FastAPI ── PostgreSQL / PostGIS
+    IoT device ── HTTPS API ──┘       │
+                                      ├── Telemetry and service history
+                                      ├── OSRM road matrix / route geometry
+                                      └── OR-Tools CVRP optimizer
 
----
+    CSV / synthetic demonstration data ── feature engineering ── Random Forest
+                                                               └── MAE/RMSE baselines
 
-## 🌟 Key Features
+## Main capabilities
 
-* **Data Preprocessing & Feature Engineering**: Generates and processes IoT time-series data, engineering key lag features and rolling averages.
-* **ML Fill Level Prediction**: Predicts future bin capacity levels using a Random Forest Regressor model.
-* **Dynamic Priority Scoring**: Calculates a normalised 0–100 priority score using mathematical membership curves taking fill %, time elapsed, and bin criticality into account.
-* **Route Optimisation (CVRP)**: Solves the Capacitated Vehicle Routing Problem using Google OR-Tools to minimise travel distances while honouring truck capacity limits.
-* **Interactive Dashboard**: Features a live Streamlit interface with Folium map rendering, dynamic priority thresholds, and route visualisation.
+- **Telemetry:** validated readings, device token gate, and duplicate-message idempotency.
+- **Data integrity:** persistent bins, collection jobs, service events, route plans, and schema migration.
+- **Prediction:** trained model artifact, inference helper, chronological holdout, mean baseline and last-observation baseline.
+- **Priority:** deterministic bounded weighted heuristic. It is not mislabeled as a true fuzzy-inference engine.
+- **Routing:** OSRM road-distance matrix, OR-Tools CVRP capacity constraints, route geometry and persisted route-plan history.
+- **Operator UI:** responsive bin register/list, telemetry summary, map and route optimization controls.
+- **CI:** legacy Python tests and backend API/optimizer tests.
 
----
+## Tests
 
-## 🛠️ Project Architecture & Modules
+    # Existing Python core
+    pip install -r requirements.txt
+    python -m unittest discover -s tests -v
 
-```text
-smart_waste_project/
-│
-├── person1_preprocessing.py   # IoT synthetic data generator & feature engineering
-├── person2_ml_prediction.py   # Random Forest model training & persistence
-├── person3_fuzzy_logic.py     # Priority engine (Fuzzy logic logic/membership math)
-├── person4_optimization.py    # Google OR-Tools Vehicle Routing Problem (VRP) solver
-├── app.py                     # Streamlit frontend & geospatial Folium map dashboard
-├── cleaned_waste_data.csv     # Preprocessed dataset
-├── waste_model.pkl            # Trained ML model artefact
-└── requirements.txt           # Project dependencies
+    # API and routing optimizer
+    cd backend
+    pip install -r requirements.txt
+    PYTHONPATH=. API_TOKEN=test-operator-token DEVICE_TOKEN=test-device-token pytest -q
+
+## API overview
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | /api/v1/bins | Register a bin |
+| GET | /api/v1/bins | List active bins |
+| POST | /api/v1/telemetry | Ingest a device reading |
+| GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |
+| POST | /api/v1/jobs | Create a collection candidate |
+| POST | /api/v1/jobs/{job_id}/transitions | Record a validated lifecycle transition |
+| POST | /api/v1/routes/optimize | Optimize stops using road-network costs |
+| GET | /api/v1/routes/plans | List persisted route plans |
+| GET | /api/v1/routes/plans/{plan_id} | Retrieve a route plan |
+
+## Limitations and next production gates
+
+- Shared bearer tokens are a development authentication mechanism, not multi-user login or role-based authorization.
+- The public OSRM endpoint has usage limits and no production service guarantee.
+- Route plans are persisted, but assignment to named drivers and vehicles is not yet a complete dispatch workflow.
+- The ML pipeline has not been validated against real sensor data and is not yet served by the API.
+- No physical sensor, calibration process, municipal pilot, or real operational savings claim has been validated.
+- Use production-grade secret management, TLS, backups, monitoring, threat modeling, and a reviewed migration process before exposing the service publicly.
+
+See docs/IMPLEMENTATION_STATUS.md and README_PLATFORM.md for details.
