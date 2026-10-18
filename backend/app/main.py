@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .db import Base, engine, get_db
 from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan
-from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest
+from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign
 from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 
@@ -97,12 +97,46 @@ ALLOWED = {
     "verified": set(),
 }
 
+
+@app.post("/api/v1/vehicles", dependencies=[Depends(require_operator)], status_code=201)
+def create_vehicle(payload: VehicleCreate, db: Session = Depends(get_db)):
+    if db.get(Vehicle, payload.id):
+        raise HTTPException(409, "Vehicle already exists")
+    vehicle = Vehicle(**payload.model_dump())
+    db.add(vehicle)
+    db.commit()
+    return {"id": vehicle.id, "capacity_liters": vehicle.capacity_liters, "active": vehicle.active}
+
+@app.get("/api/v1/vehicles", dependencies=[Depends(require_operator)])
+def list_vehicles(db: Session = Depends(get_db)):
+    rows = db.scalars(select(Vehicle).order_by(Vehicle.id))
+    return [{"id": v.id, "capacity_liters": v.capacity_liters, "active": v.active, "depot_latitude": v.depot_latitude, "depot_longitude": v.depot_longitude} for v in rows]
+
+@app.post("/api/v1/jobs/{job_id}/assign", dependencies=[Depends(require_operator)])
+def assign_job(job_id: str, payload: JobAssign, db: Session = Depends(get_db)):
+    job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
+    vehicle = db.scalar(select(Vehicle).where(Vehicle.id == payload.vehicle_id).with_for_update())
+    if not job:
+        raise HTTPException(404, "Unknown job")
+    if not vehicle or not vehicle.active:
+        raise HTTPException(404, "Unknown or inactive vehicle")
+    if job.status not in {"detected", "approved", "exception"}:
+        raise HTTPException(409, f"Job cannot be assigned from status {job.status}")
+    if job.demand_liters > vehicle.capacity_liters:
+        raise HTTPException(422, "Job demand exceeds vehicle capacity")
+    previous = job.status
+    job.status = "assigned"
+    job.assigned_vehicle_id = vehicle.id
+    db.add(ServiceEvent(job_id=job.id, actor=payload.actor, previous_status=previous, new_status="assigned", note="Assigned to vehicle " + vehicle.id))
+    db.commit()
+    return {"id": job.id, "status": job.status, "assigned_vehicle_id": job.assigned_vehicle_id}
+
 @app.post("/api/v1/jobs/{job_id}/transitions", dependencies=[Depends(require_operator)])
 def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get_db)):
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
     if not job:
         raise HTTPException(404, "Unknown job")
-    if payload.status not in ALLOWED.get(job.status, set()):
+    if payload.status == "assigned" and not job.assigned_vehicle_id:\n        raise HTTPException(409, "Assign a vehicle using the assignment endpoint before transitioning to assigned")\n    if payload.status not in ALLOWED.get(job.status, set()):
         raise HTTPException(409, f"Invalid transition: {job.status} -> {payload.status}")
     previous = job.status
     job.status = payload.status

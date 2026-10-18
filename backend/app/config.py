@@ -7,6 +7,5 @@ class Settings(BaseSettings):
     device_token: str = "change-me-device-token"
     osrm_base_url: str = "https://router.project-osrm.org"
     cors_origins: str = "http://localhost:8080,http://127.0.0.1:8080"
-    auto_create_schema: bool = True
 
 settings = Settings()

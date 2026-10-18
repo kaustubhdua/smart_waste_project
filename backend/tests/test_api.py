@@ -48,3 +48,15 @@ def test_collection_job_state_machine_and_history():
         response = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":status,"actor":"test-user"}, headers=OP)
         assert response.status_code == 200
     assert client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"approved","actor":"test-user"}, headers=OP).status_code == 409
+
+def test_assignment_requires_existing_vehicle_and_respects_capacity():
+    b = {"id":"bin-assign","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    job = client.post("/api/v1/jobs", json={"bin_id":"bin-assign","demand_liters":300}, headers=OP).json()
+    bad = client.post(f"/api/v1/jobs/{job['id']}/assign", json={"vehicle_id":"missing","actor":"dispatcher"}, headers=OP)
+    assert bad.status_code == 404
+    vehicle = {"id":"truck-1","capacity_liters":500,"depot_latitude":28.6,"depot_longitude":77.2}
+    assert client.post("/api/v1/vehicles", json=vehicle, headers=OP).status_code == 201
+    assigned = client.post(f"/api/v1/jobs/{job['id']}/assign", json={"vehicle_id":"truck-1","actor":"dispatcher"}, headers=OP)
+    assert assigned.status_code == 200
+    assert assigned.json()["assigned_vehicle_id"] == "truck-1"

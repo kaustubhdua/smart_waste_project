@@ -43,3 +43,13 @@ class RouteRequest(BaseModel):
         if len(value) != len(set(value)):
             raise ValueError("bin_ids must not contain duplicates")
         return value
+
+class VehicleCreate(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    capacity_liters: float = Field(gt=0, le=100000)
+    depot_latitude: float = Field(ge=-90, le=90)
+    depot_longitude: float = Field(ge=-180, le=180)
+
+class JobAssign(BaseModel):
+    vehicle_id: str = Field(min_length=1, max_length=80)
+    actor: str = Field(min_length=1, max_length=100)
