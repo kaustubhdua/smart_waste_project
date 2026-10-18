@@ -22,11 +22,11 @@ The platform foundation lives in the backend and web directories. It includes Fa
 
 1. Copy .env.example to .env.
 2. Replace both placeholder secrets with unique random values.
-3. Start the services:
+3. Start the services (the local template enables clearly labeled demo records):
 
     docker compose up --build
 
-4. Open the operator console at http://localhost:8080, API docs at http://localhost:8000/docs, and health check at http://localhost:8000/health.
+4. Open the operator console at http://localhost:8080, API docs at http://localhost:8000/docs, and health check at http://localhost:8000/health. Set SEED_DEMO_DATA=false in production; demo records are labeled and are not real sensor readings.
 
 Enter the configured API_TOKEN in the operator console. Enroll each device through POST /api/v1/devices. Store the returned X-Device-Token securely; only its hash is persisted. Send readings to POST /api/v1/telemetry with the enrolled device_id, its bound bin_id, a unique message_id, calibrated fill_percent, and a timezone-aware ISO timestamp. Device credentials can be rotated or revoked. The UI does not invent missing telemetry.
 

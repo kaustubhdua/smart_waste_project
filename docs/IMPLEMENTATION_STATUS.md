@@ -18,7 +18,7 @@
 - Responsive operator console served by Nginx, connected to API bin records, telemetry history, device enrollment, job creation/approval, vehicle registration and route dispatch.
 - Online mobile driver view with vehicle-scoped jobs, navigation handoff, start/complete/exception actions and driver credential enrollment.
 - Authenticated historical telemetry CSV import with schema validation, deduplication, batch commit, and explicit imported source labels.
-- Docker Compose for PostgreSQL/PostGIS, API and web console; environment template, tests and CI workflows.
+- Docker Compose for PostgreSQL/PostGIS, API and web console; environment template, tests and CI workflows.\n- Opt-in local demo seeder that creates labeled demo bins, telemetry with temperature values and vehicles; CI checks that seeding is idempotent.
 
 ## Still required before production
 - Authentication is a shared-token MVP, not multi-user identity, password login, OAuth or granular RBAC. Rotate tokens and put the API behind TLS; do not expose demo tokens.

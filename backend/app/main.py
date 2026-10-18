@@ -361,7 +361,7 @@ def operations_summary(db: Session = Depends(get_db)):
         "jobs_by_status": {status: sum(1 for job in jobs if job.status == status) for status in ALLOWED},
         "vehicles_active": sum(1 for v in db.scalars(select(Vehicle)) if v.active),
         "telemetry_stale_after_minutes": settings.telemetry_stale_after_minutes,
-        "data_is_simulated": bool(bin_rows) and all(b.source == "demo" for b in bin_rows) and not telemetry_rows,
+        "data_is_simulated": bool(bin_rows) and all(b.source == "demo" for b in bin_rows) and all(t.source == "demo" for t in telemetry_rows),
     }
 
 @app.post("/api/v1/vehicles", dependencies=[Depends(require_operator)], status_code=201)
