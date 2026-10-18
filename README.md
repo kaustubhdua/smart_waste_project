@@ -12,6 +12,16 @@
 
 **Technical proof:** time-series features · Random Forest regression · 0–100 priority scoring · CVRP optimisation · geospatial dashboard.
 
+## Evaluation contract
+
+Run the app's model evaluation in an environment with the dependencies from `requirements.txt` installed:
+
+~~~bash
+python person2_ml_prediction.py
+~~~
+
+The training script now reports a chronological holdout comparison against a mean-only baseline (MAE and RMSE). These values are for generated/synthetic data and one temporal split only; they are not field accuracy, operational savings, or evidence that a deployed collection service improved. Record the dataset-generation seed and exact run when publishing results. For a stronger evaluation, reserve later dates and unseen bins, repeat across multiple seeds, and compare against a last-observation baseline before interpreting model performance.
+
 ## Why the pipeline matters
 
 The project deliberately connects stages that are often presented as separate demos: model output becomes a prioritisation signal, prioritisation becomes an optimisation input, and the resulting route is exposed for inspection.
