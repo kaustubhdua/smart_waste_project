@@ -6,6 +6,11 @@ on:
       - ".github/workflows/platform-api.yml"
       - "web/**"
       - "docker-compose.yml"
+      - "docs/**"
+      - "README.md"
+      - "README_PLATFORM.md"
+      - "person2_ml_prediction.py"
+      - "requirements.txt"
   pull_request:
     paths:
       - "backend/**"
@@ -16,6 +21,11 @@ on:
       - "tests/**"
       - "web/**"
       - "docker-compose.yml"
+      - "docs/**"
+      - "README.md"
+      - "README_PLATFORM.md"
+      - "person2_ml_prediction.py"
+      - "requirements.txt"
   workflow_dispatch:
 permissions:
   contents: read
