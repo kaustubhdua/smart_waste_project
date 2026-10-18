@@ -4,14 +4,17 @@ from fastapi.testclient import TestClient
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_smart_waste.db"
 os.environ["API_TOKEN"] = "test-operator-token"
-os.environ["DEVICE_TOKEN"] = "test-device-token"
 
 from app.main import app
 from app.db import Base, engine
 
 client = TestClient(app)
 OP = {"Authorization": "Bearer test-operator-token"}
-DEVICE = {"X-Device-Token": "test-device-token"}
+
+def register_device(device_id, bin_id):
+    response = client.post("/api/v1/devices", json={"id":device_id,"bin_id":bin_id}, headers=OP)
+    assert response.status_code == 201, response.text
+    return {"X-Device-Token": response.json()["token"]}
 
 def setup_function():
     Base.metadata.drop_all(bind=engine)
@@ -26,9 +29,10 @@ def test_operator_token_required():
 def test_bin_and_idempotent_telemetry():
     b = {"id":"bin-test","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}
     assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
-    event = {"bin_id":"bin-test","device_id":"device-1","message_id":"m-1","fill_percent":45,"measured_at":"2026-01-01T10:00:00Z"}
-    first = client.post("/api/v1/telemetry", json=event, headers=DEVICE)
-    second = client.post("/api/v1/telemetry", json=event, headers=DEVICE)
+    device_headers = register_device("device-1", "bin-test")
+    event = {"bin_id":"bin-test","device_id":"device-1","message_id":"m-1","fill_percent":45,"measured_at":datetime.now(timezone.utc).isoformat()}
+    first = client.post("/api/v1/telemetry", json=event, headers=device_headers)
+    second = client.post("/api/v1/telemetry", json=event, headers=device_headers)
     assert first.status_code == 202 and first.json()["duplicate"] is False
     assert second.status_code == 202 and second.json()["duplicate"] is True
     assert len(client.get("/api/v1/bins/bin-test/history", headers=OP).json()) == 1
@@ -73,17 +77,20 @@ def test_duplicate_message_with_changed_payload_is_conflict():
     b = {"id":"bin-dup","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"live"}
     assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
     event = {"bin_id":"bin-dup","device_id":"device-dup","message_id":"stable-id","fill_percent":40,"measured_at":"2026-10-18T10:00:00Z"}
-    assert client.post("/api/v1/telemetry", json=event, headers=DEVICE).status_code == 202
+    device_headers = register_device("device-dup", "bin-dup")
+    event["measured_at"] = datetime.now(timezone.utc).isoformat()
+    assert client.post("/api/v1/telemetry", json=event, headers=device_headers).status_code == 202
     changed = {**event, "fill_percent":41}
-    assert client.post("/api/v1/telemetry", json=changed, headers=DEVICE).status_code == 409
+    assert client.post("/api/v1/telemetry", json=changed, headers=device_headers).status_code == 409
 
 def test_naive_and_future_telemetry_timestamps_are_rejected():
     naive = {"bin_id":"bin-time","device_id":"d","message_id":"naive","fill_percent":10,"measured_at":"2026-10-18T10:00:00"}
-    assert client.post("/api/v1/telemetry", json=naive, headers=DEVICE).status_code == 422
+    assert client.post("/api/v1/telemetry", json=naive, headers={}).status_code == 422
     b = {"id":"bin-time","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"live"}
     assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    device_headers = register_device("d", "bin-time")
     future = {**naive, "measured_at":(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()}
-    assert client.post("/api/v1/telemetry", json=future, headers=DEVICE).status_code == 422
+    assert client.post("/api/v1/telemetry", json=future, headers=device_headers).status_code == 422
 
 def test_operations_summary_and_job_events_are_persistent():
     b = {"id":"bin-summary","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}
@@ -115,8 +122,10 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
     for bin_id, longitude in (("dispatch-a",77.20),("dispatch-b",77.21)):
         b = {"id":bin_id,"latitude":28.6,"longitude":longitude,"capacity_liters":1000,"criticality":2,"source":"live"}
         assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
-        telemetry = {"bin_id":bin_id,"device_id":"device-"+bin_id,"message_id":"now-"+bin_id,"fill_percent":30,"measured_at":datetime.now(timezone.utc).isoformat()}
-        assert client.post("/api/v1/telemetry", json=telemetry, headers=DEVICE).status_code == 202
+        device_id = "device-"+bin_id
+        device_headers = register_device(device_id, bin_id)
+        telemetry = {"bin_id":bin_id,"device_id":device_id,"message_id":"now-"+bin_id,"fill_percent":30,"measured_at":datetime.now(timezone.utc).isoformat()}
+        assert client.post("/api/v1/telemetry", json=telemetry, headers=device_headers).status_code == 202
     jobs = []
     for bin_id in ("dispatch-a","dispatch-b"):
         job = client.post("/api/v1/jobs", json={"bin_id":bin_id,"demand_liters":100}, headers=OP).json()
@@ -137,10 +146,26 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
 def test_job_priority_is_computed_from_fresh_fill_and_bin_criticality():
     b = {"id":"bin-priority","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":5,"source":"live"}
     assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    device_headers = register_device("priority-device", "bin-priority")
     event = {"bin_id":"bin-priority","device_id":"priority-device","message_id":"priority-now","fill_percent":90,"measured_at":datetime.now(timezone.utc).isoformat()}
-    assert client.post("/api/v1/telemetry", json=event, headers=DEVICE).status_code == 202
+    assert client.post("/api/v1/telemetry", json=event, headers=device_headers).status_code == 202
     job = client.post("/api/v1/jobs", json={"bin_id":"bin-priority"}, headers=OP)
     assert job.status_code == 201
     assert 0 <= job.json()["priority"] <= 100
     assert job.json()["priority_method"] == "weighted heuristic"
     assert job.json()["demand_liters"] == 900
+
+def test_device_credentials_are_scoped_revocable_and_rotatable():
+    for bin_id in ("device-bin-a","device-bin-b"):
+        b = {"id":bin_id,"latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"live"}
+        assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    device_headers = register_device("scoped-device", "device-bin-a")
+    event = {"bin_id":"device-bin-a","device_id":"scoped-device","message_id":"scope-1","fill_percent":15,"measured_at":datetime.now(timezone.utc).isoformat()}
+    assert client.post("/api/v1/telemetry", json=event, headers={"X-Device-Token":"wrong"}).status_code == 401
+    wrong_bin = {**event,"bin_id":"device-bin-b","message_id":"scope-2"}
+    assert client.post("/api/v1/telemetry", json=wrong_bin, headers=device_headers).status_code == 403
+    assert client.delete("/api/v1/devices/scoped-device", headers=OP).status_code == 200
+    assert client.post("/api/v1/telemetry", json=event, headers=device_headers).status_code == 401
+    rotated = client.post("/api/v1/devices/scoped-device/rotate-token", headers=OP)
+    assert rotated.status_code == 200
+    assert client.post("/api/v1/telemetry", json=event, headers={"X-Device-Token":rotated.json()["token"]}).status_code == 202
