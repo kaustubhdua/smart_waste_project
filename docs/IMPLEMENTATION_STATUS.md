@@ -12,15 +12,18 @@
 - Online driver view with vehicle-scoped jobs, external navigation handoff, start/complete/exception actions and driver credential enrollment.
 - Operator console for bins, device enrollment, vehicles, jobs, approval, route dispatch and optional model forecasts.
 - Explicitly labeled demo seed data for local development; CI verifies that seeding is idempotent.
-- Pinned dependencies, backend API/optimizer tests, original Python tests, migration checks, browser JavaScript syntax checks and Docker image build validation.
+- Production-mode startup guardrails that reject SQLite, weak/placeholder operator tokens, automatic schema creation, demo seeding and non-HTTPS/wildcard CORS settings.
+- Compose services bind published ports to loopback by default and include service health checks; CI builds and starts the full stack, waits for readiness, probes the operator/driver pages and authenticated API, and tears down test volumes.
+- Automated weekly Dependabot update PRs for root/backend Python dependencies, container images and GitHub Actions.
+- Pinned dependencies, backend API/optimizer tests, original Python tests, migration checks, browser JavaScript syntax checks, container builds and Compose runtime smoke tests.
 
 ## Still required before production
-- Operator authentication is a shared bearer-token MVP, not multi-user identity, OAuth or granular RBAC. Add managed identity, per-user roles, rate limiting and secret rotation policies.
+- Operator authentication is a shared bearer-token MVP, not multi-user identity, OAuth or granular RBAC. Before exposing the console beyond a trusted deployment boundary, integrate managed identity, per-user roles, rate limiting and an operational secret rotation policy. Production-mode configuration checks do not supply those identity features.
 - Public OSRM is a development dependency with usage limits and no service guarantee; use a contracted or self-hosted routing service for deployment.
 - The model predicts the next observed fill value; it is not a calibrated 6/12-hour forecast. Its current evaluation is based on the repository dataset and does not establish field accuracy. Temperature readings and roughly hourly recent observations are required.
 - Model-assisted demand is disabled by default. Do not enable USE_MODEL_FOR_DISPATCH until model evaluation on representative real sensor data supports the change.
 - No physical sensor has been calibrated or field-tested. Device clock synchronization, sensor mounting, bin geometry and real fill measurement need a pilot.
 - Driver view is online-only, with no offline action queue or embedded turn-by-turn navigation; navigation is handed off to an external map application.
 - Although PostGIS is included in the database image, the current core schema stores latitude/longitude as validated numeric columns rather than using spatial column/index features.
-- Production backups/restore drills, TLS, managed secrets, observability/alerting, load tests, accessibility review and a municipal field pilot remain release gates.
+- Production backups/restore drills, a TLS-terminating reverse proxy/domain, managed secrets, observability/alerting, load tests, accessibility review and a municipal field pilot remain release gates. Compose binds services to loopback; an operator must configure the external TLS proxy and deployment environment.
 - CI passing proves the checked code and container builds work in the test environment; it does not prove hardware calibration, production load, predictive quality or real-world savings.
