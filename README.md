@@ -90,7 +90,7 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
 | POST | /api/v1/driver/jobs/{job_id}/transition | Start, complete or report an assigned stop exception |
 | DELETE | /api/v1/devices/{device_id} | Revoke a device credential |
 | POST | /api/v1/telemetry | Ingest a live device reading |\n| POST | /api/v1/telemetry/import-csv | Import validated historical telemetry CSV (2 MB / 10,000 row limit) |
-| GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |\n| GET | /api/v1/operations/summary | Inspect freshness and job-state counts |\n| GET | /api/v1/jobs | List collection jobs, optionally filtered by status |\n| GET | /api/v1/jobs/{job_id}/events | Inspect service history |\n| POST | /api/v1/vehicles | Register a collection vehicle |\n| POST | /api/v1/jobs/{job_id}/assign | Assign a job to a capacity-checked vehicle |
+| GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |\n| GET | /api/v1/operations/summary | Inspect freshness and job-state counts |\n| GET | /api/v1/forecasts | Predict next-observation fill for bins with suitable recent history and a trained artifact |\n| GET | /api/v1/jobs | List collection jobs, optionally filtered by status |\n| GET | /api/v1/jobs/{job_id}/events | Inspect service history |\n| POST | /api/v1/vehicles | Register a collection vehicle |\n| POST | /api/v1/jobs/{job_id}/assign | Assign a job to a capacity-checked vehicle |
 | POST | /api/v1/jobs | Create a collection candidate |
 | POST | /api/v1/jobs/{job_id}/transitions | Record a validated lifecycle transition |
 | POST | /api/v1/routes/optimize | Preview an optimized route plan |\n| POST | /api/v1/routes/dispatch | Optimize approved jobs against registered vehicles and assign stops transactionally |
@@ -102,7 +102,7 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
 - Shared bearer tokens are a development authentication mechanism, not multi-user login or role-based authorization.
 - The public OSRM endpoint has usage limits and no production service guarantee.
 - Dispatch is available for approved jobs and registered vehicles; named drivers have vehicle-scoped credentials and an online mobile workflow. Offline actions and turn-by-turn navigation are not implemented.
-- The ML pipeline has not been validated against real sensor data and is not yet served by the API.
+- The API can serve the model artifact trained by person2_ml_prediction.py when temperature measurements and enough recent history are present. The current model predicts the next observed value, not a calibrated 6/12-hour forecast; model-driven demand is opt-in and should remain disabled until validated against field data.
 - No physical sensor, calibration process, municipal pilot, or real operational savings claim has been validated.
 - Use production-grade secret management, TLS, backups, monitoring, threat modeling, and a reviewed migration process before exposing the service publicly.
 

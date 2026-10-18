@@ -199,3 +199,26 @@ def test_csv_import_rejects_unknown_bins_without_partial_commit():
     csv_body = "bin_id,device_id,message_id,fill_percent,measured_at\nmissing,dataset-1,row-1,42,2026-10-18T10:00:00Z\n"
     response = client.post("/api/v1/telemetry/import-csv", files={"file":("readings.csv",csv_body,"text/csv")}, headers=OP)
     assert response.status_code == 422
+
+def test_forecast_endpoint_uses_loaded_artifact_and_real_history(monkeypatch):
+    import app.main as main_module
+
+    class FakeModel:
+        def predict(self, frame):
+            assert list(frame.columns) == main_module.MODEL_FEATURES
+            assert frame.iloc[0]["temperature_c"] == 25.0
+            return [67.5]
+
+    b = {"id":"bin-forecast","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":3,"source":"live"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    headers = register_device("forecast-device", "bin-forecast")
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    for idx, fill in enumerate((20, 28, 35)):
+        event = {"bin_id":"bin-forecast","device_id":"forecast-device","message_id":f"forecast-{idx}","fill_percent":fill,"temperature_c":25.0,"measured_at":(now-timedelta(hours=2-idx)).isoformat()}
+        assert client.post("/api/v1/telemetry", json=event, headers=headers).status_code == 202
+    artifact = {"model":FakeModel(),"features":main_module.MODEL_FEATURES,"metrics":{"evaluation_note":"test fixture"},"target":"next observed fill"}
+    monkeypatch.setattr(main_module, "_load_forecast_artifact", lambda: artifact)
+    response = client.get("/api/v1/forecasts", headers=OP)
+    assert response.status_code == 200, response.text
+    assert response.json()["predictions"][0]["predicted_next_fill_percent"] == 67.5
+    assert response.json()["forecast_semantics"].startswith("next observed fill")
