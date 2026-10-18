@@ -35,4 +35,6 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
       - run: pytest -q
+      - name: Verify schema migration from an empty database
+        run: DATABASE_URL=sqlite:///./migration_test.db alembic upgrade head
       - run: python -m compileall -q app
