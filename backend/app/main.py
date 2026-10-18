@@ -26,7 +26,7 @@ from .optimizer import optimize_cvrp, OptimizationError
 app = FastAPI(title="Smart Waste Operations API", version="1.1.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
 if settings.auto_create_schema:
     Base.metadata.create_all(bind=engine)
-app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Device-Token'])
+app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Device-Token', 'X-Driver-Id', 'X-Driver-Token'])
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)

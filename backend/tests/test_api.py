@@ -232,3 +232,16 @@ def test_job_demand_cannot_exceed_bin_capacity():
     assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
     response = client.post("/api/v1/jobs", json={"bin_id":"bin-capacity","demand_liters":101}, headers=OP)
     assert response.status_code == 422
+
+def test_cors_allows_driver_auth_headers():
+    response = client.options(
+        "/api/v1/driver/jobs",
+        headers={
+            "Origin":"http://localhost:8080",
+            "Access-Control-Request-Method":"GET",
+            "Access-Control-Request-Headers":"x-driver-id,x-driver-token",
+        },
+    )
+    assert response.status_code == 200
+    assert "x-driver-id" in response.headers.get("access-control-allow-headers", "").lower()
+    assert "x-driver-token" in response.headers.get("access-control-allow-headers", "").lower()
