@@ -13,7 +13,7 @@ from secrets import token_urlsafe
 from uuid import uuid4
 from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .config import settings
@@ -26,7 +26,7 @@ from .optimizer import optimize_cvrp, OptimizationError
 app = FastAPI(title="Smart Waste Operations API", version="1.1.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
 if settings.auto_create_schema:
     Base.metadata.create_all(bind=engine)
-app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Device-Token', 'X-Driver-Id', 'X-Driver-Token'])
+app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'DELETE', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Device-Token', 'X-Driver-Id', 'X-Driver-Token'])
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
@@ -352,30 +352,45 @@ def job_events(job_id: str, db: Session = Depends(get_db)):
     if not db.get(CollectionJob, job_id):
         raise HTTPException(404, "Unknown job")
     rows = db.scalars(select(ServiceEvent).where(ServiceEvent.job_id == job_id).order_by(ServiceEvent.created_at, ServiceEvent.id))
-    return [{"id": e.id, "actor": e.actor, "previous_status": e.previous_status, "new_status": e.new_status, "note": e.note, "created_at": e.created_at} for e in rows]
-
-@app.get("/api/v1/operations/summary", dependencies=[Depends(require_operator)])
+    return [{"id": e.id, "actor": e.actor, "previous_status": e.previous_status, "new_status": e.new_status, "note": e.note, "created_at": e.created_at} @app.get("/api/v1/operations/summary", dependencies=[Depends(require_operator)])
 def operations_summary(db: Session = Depends(get_db)):
+    """Return dashboard counts using aggregates rather than loading every historical row."""
     now = datetime.now(timezone.utc)
-    bin_rows = list(db.scalars(select(Bin).where(Bin.active.is_(True))))
-    telemetry_rows = list(db.scalars(select(Telemetry)))
-    latest_by_bin = {}
-    for event in telemetry_rows:
-        previous = latest_by_bin.get(event.bin_id)
-        if previous is None or _utc(event.measured_at) > _utc(previous.measured_at):
-            latest_by_bin[event.bin_id] = event
-    fresh = sum(1 for event in latest_by_bin.values() if not _is_stale(event.measured_at))
-    jobs = list(db.scalars(select(CollectionJob)))
+    active_bins = int(db.scalar(select(func.count()).select_from(Bin).where(Bin.active.is_(True))) or 0)
+    latest_by_bin = db.execute(
+        select(Telemetry.bin_id, func.max(Telemetry.measured_at).label("latest_at"))
+        .group_by(Telemetry.bin_id)
+    ).all()
+    fresh = sum(1 for row in latest_by_bin if not _is_stale(row.latest_at))
+    job_counts = {
+        status: int(count)
+        for status, count in db.execute(
+            select(CollectionJob.status, func.count()).group_by(CollectionJob.status)
+        ).all()
+    }
+    for status in ALLOWED:
+        job_counts.setdefault(status, 0)
+    active_vehicles = int(
+        db.scalar(select(func.count()).select_from(Vehicle).where(Vehicle.active.is_(True))) or 0
+    )
+    non_demo_bins = int(
+        db.scalar(select(func.count()).select_from(Bin).where(Bin.source != "demo")) or 0
+    )
+    non_demo_telemetry = int(
+        db.scalar(select(func.count()).select_from(Telemetry).where(Telemetry.source != "demo")) or 0
+    )
     return {
         "generated_at": now,
-        "active_bins": len(bin_rows),
+        "active_bins": active_bins,
         "bins_with_telemetry": len(latest_by_bin),
         "fresh_telemetry_bins": fresh,
         "stale_or_future_telemetry_bins": len(latest_by_bin) - fresh,
-        "jobs_by_status": {status: sum(1 for job in jobs if job.status == status) for status in ALLOWED},
-        "vehicles_active": sum(1 for v in db.scalars(select(Vehicle)) if v.active),
+        "jobs_by_status": job_counts,
+        "vehicles_active": active_vehicles,
         "telemetry_stale_after_minutes": settings.telemetry_stale_after_minutes,
-        "data_is_simulated": bool(bin_rows) and all(b.source == "demo" for b in bin_rows) and all(t.source == "demo" for t in telemetry_rows),
+        "data_is_simulated": active_bins > 0 and non_demo_bins == 0 and non_demo_telemetry == 0,
+    }
+ry_rows),
     }
 
 @app.post("/api/v1/vehicles", dependencies=[Depends(require_operator)], status_code=201)
