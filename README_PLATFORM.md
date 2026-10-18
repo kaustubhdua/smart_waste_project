@@ -38,3 +38,7 @@ From the repository root, install `requirements.txt` and run `python person2_ml_
 ## Data truthfulness
 
 Every bin has a `source` of `live`, `imported`, or `demo`. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. Routing uses real road-network distance/time data; if the provider fails, the API returns an error rather than fabricating distances. The API serves next-observation forecasts when a trained artifact and suitable telemetry are available; no field-performance claims are made. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.
+
+## Production configuration guardrails
+
+Set `APP_ENV=production` to make the API refuse unsafe startup configuration. Production requires a non-SQLite durable database, an `API_TOKEN` with at least 32 characters, `AUTO_CREATE_SCHEMA=false`, `SEED_DEMO_DATA=false`, and explicit trusted HTTPS origins in `CORS_ORIGINS`. Apply schema changes through Alembic migrations. The guard prevents common misconfiguration; it is not a substitute for identity-based RBAC, TLS termination, managed secrets, backups, monitoring, and a security review.
