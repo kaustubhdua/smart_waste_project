@@ -142,6 +142,18 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
         assert found["status"] == "assigned"
         assert found["assigned_vehicle_id"] == "dispatch-truck"
     assert client.get("/health/ready").json()["status"] == "ready"
+    driver_response = client.post("/api/v1/drivers", json={"id":"driver-01","vehicle_id":"dispatch-truck"}, headers=OP)
+    assert driver_response.status_code == 201
+    driver_headers = {"X-Driver-Id":"driver-01","X-Driver-Token":driver_response.json()["token"]}
+    driver_jobs = client.get("/api/v1/driver/jobs", headers=driver_headers)
+    assert driver_jobs.status_code == 200
+    assert sorted(j["id"] for j in driver_jobs.json()) == sorted(jobs)
+    for job_id in jobs:
+        started = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"in_progress"}, headers=driver_headers)
+        assert started.status_code == 200
+        completed = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"completed","note":"Collected and recorded by driver"}, headers=driver_headers)
+        assert completed.status_code == 200
+    assert client.get("/api/v1/driver/jobs", headers=driver_headers).json() == []
 
 def test_job_priority_is_computed_from_fresh_fill_and_bin_criticality():
     b = {"id":"bin-priority","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":5,"source":"live"}

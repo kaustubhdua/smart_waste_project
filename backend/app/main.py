@@ -14,8 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .config import settings
 from .db import Base, engine, get_db
-from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device
-from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate
+from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device, Driver
+from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate, DriverCreate, DriverTransition
 from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 
@@ -371,6 +371,82 @@ async def optimize_route(payload: RouteRequest, db: Session = Depends(get_db)):
     db.add(RoutePlan(id=plan_id, depot_latitude=payload.depot_latitude, depot_longitude=payload.depot_longitude, routing_provider="OSRM", solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
     db.commit()
     return {"route_plan_id": plan_id, **response_payload}
+
+def _driver_auth(driver_id: str | None, token: str | None, db: Session) -> Driver:
+    driver = db.get(Driver, driver_id) if driver_id else None
+    if not driver or not driver.active or not token or not compare_digest(driver.token_hash, sha256(token.encode("utf-8")).hexdigest()):
+        raise HTTPException(401, "Valid active driver credential required")
+    driver.last_seen_at = datetime.now(timezone.utc)
+    return driver
+
+@app.post("/api/v1/drivers", dependencies=[Depends(require_operator)], status_code=201)
+def register_driver(payload: DriverCreate, db: Session = Depends(get_db)):
+    if db.get(Driver, payload.id):
+        raise HTTPException(409, "Driver already exists")
+    vehicle = db.get(Vehicle, payload.vehicle_id)
+    if not vehicle or not vehicle.active:
+        raise HTTPException(404, "Unknown or inactive vehicle")
+    raw_token = token_urlsafe(32)
+    driver = Driver(id=payload.id, vehicle_id=vehicle.id, token_hash=sha256(raw_token.encode("utf-8")).hexdigest())
+    db.add(driver)
+    db.commit()
+    return {"id": driver.id, "vehicle_id": driver.vehicle_id, "token": raw_token, "token_notice": "Store this token securely; it will not be shown again."}
+
+@app.get("/api/v1/drivers", dependencies=[Depends(require_operator)])
+def list_drivers(db: Session = Depends(get_db)):
+    rows = db.scalars(select(Driver).order_by(Driver.id))
+    return [{"id": d.id, "vehicle_id": d.vehicle_id, "active": d.active, "last_seen_at": d.last_seen_at} for d in rows]
+
+@app.post("/api/v1/drivers/{driver_id}/rotate-token", dependencies=[Depends(require_operator)])
+def rotate_driver_token(driver_id: str, db: Session = Depends(get_db)):
+    driver = db.get(Driver, driver_id)
+    if not driver:
+        raise HTTPException(404, "Unknown driver")
+    raw_token = token_urlsafe(32)
+    driver.token_hash = sha256(raw_token.encode("utf-8")).hexdigest()
+    driver.active = True
+    db.commit()
+    return {"id": driver.id, "token": raw_token, "token_notice": "Store this token securely; the previous token is now invalid."}
+
+@app.delete("/api/v1/drivers/{driver_id}", dependencies=[Depends(require_operator)])
+def revoke_driver(driver_id: str, db: Session = Depends(get_db)):
+    driver = db.get(Driver, driver_id)
+    if not driver:
+        raise HTTPException(404, "Unknown driver")
+    driver.active = False
+    db.commit()
+    return {"id": driver.id, "active": False}
+
+@app.get("/api/v1/driver/jobs")
+def driver_jobs(x_driver_id: str | None = Header(default=None), x_driver_token: str | None = Header(default=None), db: Session = Depends(get_db)):
+    driver = _driver_auth(x_driver_id, x_driver_token, db)
+    jobs = db.scalars(select(CollectionJob).where(CollectionJob.assigned_vehicle_id == driver.vehicle_id, CollectionJob.status.in_(["assigned", "in_progress"])).order_by(CollectionJob.priority.desc(), CollectionJob.created_at))
+    result = []
+    for job in jobs:
+        bin_row = db.get(Bin, job.bin_id)
+        result.append({"id": job.id, "bin_id": job.bin_id, "status": job.status, "demand_liters": job.demand_liters, "priority": job.priority, "latitude": bin_row.latitude if bin_row else None, "longitude": bin_row.longitude if bin_row else None})
+    db.commit()
+    return result
+
+@app.post("/api/v1/driver/jobs/{job_id}/transition")
+def driver_transition(job_id: str, payload: DriverTransition, x_driver_id: str | None = Header(default=None), x_driver_token: str | None = Header(default=None), db: Session = Depends(get_db)):
+    driver = _driver_auth(x_driver_id, x_driver_token, db)
+    job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
+    if not job:
+        raise HTTPException(404, "Unknown job")
+    if job.assigned_vehicle_id != driver.vehicle_id:
+        raise HTTPException(403, "Job is not assigned to this driver's vehicle")
+    if payload.status not in ALLOWED.get(job.status, set()) or payload.status not in {"in_progress", "completed", "exception"}:
+        raise HTTPException(409, f"Invalid driver transition: {job.status} -> {payload.status}")
+    previous = job.status
+    job.status = payload.status
+    if payload.status == "completed":
+        bin_row = db.get(Bin, job.bin_id)
+        if bin_row:
+            bin_row.last_emptied_at = datetime.now(timezone.utc)
+    db.add(ServiceEvent(job_id=job.id, actor="driver:" + driver.id, previous_status=previous, new_status=payload.status, note=payload.note))
+    db.commit()
+    return {"id": job.id, "previous_status": previous, "status": job.status}
 
 @app.post("/api/v1/routes/dispatch", dependencies=[Depends(require_operator)])
 async def dispatch_approved_jobs(payload: DispatchRequest, db: Session = Depends(get_db)):

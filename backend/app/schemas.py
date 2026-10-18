@@ -82,3 +82,11 @@ class DispatchRequest(BaseModel):
 class DeviceCreate(BaseModel):
     id: str = Field(min_length=1, max_length=100)
     bin_id: str = Field(min_length=1, max_length=80)
+
+class DriverCreate(BaseModel):
+    id: str = Field(min_length=1, max_length=100)
+    vehicle_id: str = Field(min_length=1, max_length=80)
+
+class DriverTransition(BaseModel):
+    status: str = Field(pattern="^(in_progress|completed|exception)$")
+    note: str | None = Field(default=None, max_length=1000)
