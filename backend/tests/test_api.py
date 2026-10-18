@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_smart_waste.db"
@@ -67,3 +68,32 @@ def test_assignment_requires_existing_vehicle_and_respects_capacity():
     assigned = client.post(f"/api/v1/jobs/{job['id']}/assign", json={"vehicle_id":"truck-1","actor":"dispatcher"}, headers=OP)
     assert assigned.status_code == 200
     assert assigned.json()["assigned_vehicle_id"] == "truck-1"
+
+def test_duplicate_message_with_changed_payload_is_conflict():
+    b = {"id":"bin-dup","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"live"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    event = {"bin_id":"bin-dup","device_id":"device-dup","message_id":"stable-id","fill_percent":40,"measured_at":"2026-10-18T10:00:00Z"}
+    assert client.post("/api/v1/telemetry", json=event, headers=DEVICE).status_code == 202
+    changed = {**event, "fill_percent":41}
+    assert client.post("/api/v1/telemetry", json=changed, headers=DEVICE).status_code == 409
+
+def test_naive_and_future_telemetry_timestamps_are_rejected():
+    naive = {"bin_id":"bin-time","device_id":"d","message_id":"naive","fill_percent":10,"measured_at":"2026-10-18T10:00:00"}
+    assert client.post("/api/v1/telemetry", json=naive, headers=DEVICE).status_code == 422
+    b = {"id":"bin-time","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"live"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    future = {**naive, "measured_at":(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()}
+    assert client.post("/api/v1/telemetry", json=future, headers=DEVICE).status_code == 422
+
+def test_operations_summary_and_job_events_are_persistent():
+    b = {"id":"bin-summary","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    job = client.post("/api/v1/jobs", json={"bin_id":"bin-summary","demand_liters":100}, headers=OP).json()
+    summary = client.get("/api/v1/operations/summary", headers=OP)
+    assert summary.status_code == 200
+    assert summary.json()["active_bins"] == 1
+    assert summary.json()["jobs_by_status"]["detected"] == 1
+    events = client.get(f"/api/v1/jobs/{job['id']}/events", headers=OP)
+    assert events.status_code == 200
+    assert events.json()[0]["new_status"] == "detected"
+    assert client.get("/api/v1/jobs?status=unknown", headers=OP).status_code == 422

@@ -15,3 +15,9 @@ def test_demand_above_every_vehicle_is_rejected():
 def test_invalid_matrix_rejected():
     with pytest.raises(ValueError):
         optimize_cvrp([[0, 1], [1]], [0, 1], [10])
+
+def test_non_finite_distances_and_invalid_depot_are_rejected():
+    with pytest.raises(ValueError):
+        optimize_cvrp([[0, float("nan")], [1, 0]], [0, 1], [10])
+    with pytest.raises(ValueError):
+        optimize_cvrp([[0, 1], [1, 0]], [0, 1], [10], depot=2)

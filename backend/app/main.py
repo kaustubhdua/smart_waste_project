@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from math import isfinite
 import json
 from hmac import compare_digest
 from uuid import uuid4
@@ -69,7 +68,7 @@ def ingest_telemetry(payload: TelemetryIn, db: Session = Depends(get_db)):
         db.rollback()
         existing = db.scalar(select(Telemetry).where(Telemetry.device_id == payload.device_id, Telemetry.message_id == payload.message_id))
         if existing:
-            same_payload = (existing.bin_id == payload.bin_id and existing.fill_percent == payload.fill_percent and existing.measured_at == payload.measured_at.astimezone(timezone.utc))
+            same_payload = (existing.bin_id == payload.bin_id and existing.fill_percent == payload.fill_percent and _utc(existing.measured_at) == measured_at)
             if not same_payload:
                 raise HTTPException(409, "Message ID was already used with a different payload")
             return {"accepted": True, "duplicate": True, "telemetry_id": existing.id}
@@ -90,9 +89,9 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
     if not bin_row:
         raise HTTPException(404, "Unknown bin")
     latest = db.scalar(select(Telemetry).where(Telemetry.bin_id == payload.bin_id).order_by(Telemetry.measured_at.desc()).limit(1))
-    if latest is not None and _is_stale(latest.measured_at):
-        raise HTTPException(422, "Latest telemetry is stale; provide an explicit demand or ingest a fresh reading")
     demand = payload.demand_liters
+    if demand is None and latest is not None and _is_stale(latest.measured_at):
+        raise HTTPException(422, "Latest telemetry is stale; ingest a fresh reading before estimating demand")
     if demand is None:
         if latest is None:
             raise HTTPException(422, "Demand is required when no telemetry exists")

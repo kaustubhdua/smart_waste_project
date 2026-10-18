@@ -83,7 +83,7 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
 | POST | /api/v1/bins | Register a bin |
 | GET | /api/v1/bins | List active bins |
 | POST | /api/v1/telemetry | Ingest a device reading |
-| GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |
+| GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |\n| GET | /api/v1/operations/summary | Inspect freshness and job-state counts |\n| GET | /api/v1/jobs | List collection jobs, optionally filtered by status |\n| GET | /api/v1/jobs/{job_id}/events | Inspect service history |\n| POST | /api/v1/vehicles | Register a collection vehicle |\n| POST | /api/v1/jobs/{job_id}/assign | Assign a job to a capacity-checked vehicle |
 | POST | /api/v1/jobs | Create a collection candidate |
 | POST | /api/v1/jobs/{job_id}/transitions | Record a validated lifecycle transition |
 | POST | /api/v1/routes/optimize | Optimize stops using road-network costs |
