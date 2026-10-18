@@ -92,6 +92,19 @@ def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
         raise ValueError("Model returned a non-finite prediction")
     return min(100.0, max(0.0, prediction)), None
 
+def _release_vehicle_if_idle(db: Session, vehicle_id: str | None):
+    if not vehicle_id:
+        return
+    vehicle = db.get(Vehicle, vehicle_id)
+    if not vehicle:
+        return
+    active_job = db.scalar(select(CollectionJob.id).where(
+        CollectionJob.assigned_vehicle_id == vehicle_id,
+        CollectionJob.status.in_(["assigned", "in_progress", "completed"]),
+    ).limit(1))
+    if active_job is None:
+        vehicle.available = True
+
 def require_operator(authorization: str | None = Header(default=None)):
     expected = "Bearer " + settings.api_token
     if not authorization or not compare_digest(authorization, expected) or settings.api_token.startswith(("change-me", "replace-with")):
@@ -410,21 +423,18 @@ def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get
     if payload.status not in ALLOWED.get(job.status, set()):
         raise HTTPException(409, f"Invalid transition: {job.status} -> {payload.status}")
     previous = job.status
+    previous_vehicle_id = job.assigned_vehicle_id
     job.status = payload.status
     if payload.status == "verified":
         bin_row = db.get(Bin, job.bin_id)
         if bin_row:
             bin_row.last_emptied_at = datetime.now(timezone.utc)
-        if job.assigned_vehicle_id:
-            vehicle = db.get(Vehicle, job.assigned_vehicle_id)
-            if vehicle:
-                active_jobs = db.scalar(select(CollectionJob.id).where(CollectionJob.assigned_vehicle_id == vehicle.id, CollectionJob.id != job.id, CollectionJob.status.in_(["assigned", "in_progress", "completed"])).limit(1))
-                if active_jobs is None:
-                    vehicle.available = True
-    if payload.status == "exception" and job.assigned_vehicle_id:
-        vehicle = db.get(Vehicle, job.assigned_vehicle_id)
-        if vehicle:
-            vehicle.available = True
+        _release_vehicle_if_idle(db, previous_vehicle_id)
+    elif payload.status == "exception":
+        _release_vehicle_if_idle(db, previous_vehicle_id)
+    elif payload.status == "approved" and previous in {"assigned", "exception"}:
+        job.assigned_vehicle_id = None
+        _release_vehicle_if_idle(db, previous_vehicle_id)
     db.add(ServiceEvent(job_id=job.id, actor=payload.actor, previous_status=previous, new_status=payload.status, note=payload.note))
     db.commit()
     return {"id": job.id, "previous_status": previous, "status": job.status}
@@ -544,9 +554,7 @@ def driver_transition(job_id: str, payload: DriverTransition, x_driver_id: str |
         if bin_row:
             bin_row.last_emptied_at = datetime.now(timezone.utc)
     if payload.status == "exception":
-        vehicle = db.get(Vehicle, driver.vehicle_id)
-        if vehicle:
-            vehicle.available = True
+        _release_vehicle_if_idle(db, driver.vehicle_id)
     db.add(ServiceEvent(job_id=job.id, actor="driver:" + driver.id, previous_status=previous, new_status=payload.status, note=payload.note))
     db.commit()
     return {"id": job.id, "previous_status": previous, "status": job.status}
