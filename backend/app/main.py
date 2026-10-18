@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .db import Base, engine, get_db
 from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle
-from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign
+from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest
 from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 
@@ -28,16 +28,24 @@ def _is_stale(measured_at: datetime) -> bool:
 
 def require_operator(authorization: str | None = Header(default=None)):
     expected = "Bearer " + settings.api_token
-    if not authorization or not compare_digest(authorization, expected) or settings.api_token.startswith("change-me"):
+    if not authorization or not compare_digest(authorization, expected) or settings.api_token.startswith(("change-me", "replace-with")):
         raise HTTPException(status_code=401, detail="Valid configured operator bearer token required")
 
 def require_device(x_device_token: str | None = Header(default=None)):
-    if not x_device_token or not compare_digest(x_device_token, settings.device_token) or settings.device_token.startswith("change-me"):
+    if not x_device_token or not compare_digest(x_device_token, settings.device_token) or settings.device_token.startswith(("change-me", "replace-with")):
         raise HTTPException(status_code=401, detail="Valid configured device token required")
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "smart-waste-api"}
+
+@app.get("/health/ready")
+def readiness(db: Session = Depends(get_db)):
+    try:
+        db.execute(select(1))
+    except Exception as exc:
+        raise HTTPException(503, "Database is not ready") from exc
+    return {"status": "ready", "database": "connected"}
 
 @app.post("/api/v1/bins", response_model=BinOut, dependencies=[Depends(require_operator)], status_code=201)
 def create_bin(payload: BinCreate, db: Session = Depends(get_db)):
@@ -245,6 +253,77 @@ async def optimize_route(payload: RouteRequest, db: Session = Depends(get_db)):
     plan_id = str(uuid4())
     response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": "OSRM", "solver": optimized["solver"], "data_mode": "telemetry-derived demand; verify sensor calibration before operational use"}
     db.add(RoutePlan(id=plan_id, depot_latitude=payload.depot_latitude, depot_longitude=payload.depot_longitude, routing_provider="OSRM", solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
+    db.commit()
+    return {"route_plan_id": plan_id, **response_payload}
+
+@app.post("/api/v1/routes/dispatch", dependencies=[Depends(require_operator)])
+async def dispatch_approved_jobs(payload: DispatchRequest, db: Session = Depends(get_db)):
+    """Optimize approved jobs against registered vehicle capacities and atomically assign route stops."""
+    jobs = []
+    bins = []
+    seen_bins = set()
+    for job_id in payload.job_ids:
+        job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
+        if not job:
+            raise HTTPException(404, f"Unknown job: {job_id}")
+        if job.status != "approved":
+            raise HTTPException(409, f"Job {job_id} must be approved before dispatch (current: {job.status})")
+        if job.bin_id in seen_bins:
+            raise HTTPException(422, "Only one open job per bin may be included in a dispatch")
+        seen_bins.add(job.bin_id)
+        bin_row = db.get(Bin, job.bin_id)
+        latest = db.scalar(select(Telemetry).where(Telemetry.bin_id == job.bin_id).order_by(Telemetry.measured_at.desc()).limit(1))
+        if not bin_row or not bin_row.active:
+            raise HTTPException(422, f"Bin for job {job_id} is inactive")
+        if latest is None or _is_stale(latest.measured_at):
+            raise HTTPException(422, f"Fresh telemetry is required for job {job_id}")
+        jobs.append(job)
+        bins.append(bin_row)
+    vehicle_query = select(Vehicle).where(Vehicle.active.is_(True)).order_by(Vehicle.id)
+    if payload.vehicle_ids:
+        vehicle_query = select(Vehicle).where(Vehicle.active.is_(True), Vehicle.id.in_(payload.vehicle_ids)).order_by(Vehicle.id)
+    vehicles = list(db.scalars(vehicle_query))
+    if payload.vehicle_ids and len(vehicles) != len(payload.vehicle_ids):
+        raise HTTPException(422, "One or more requested vehicles do not exist or are inactive")
+    if not vehicles:
+        raise HTTPException(422, "No active vehicles are registered")
+    depot = (vehicles[0].depot_latitude, vehicles[0].depot_longitude)
+    if any(abs(v.depot_latitude - depot[0]) > 0.0001 or abs(v.depot_longitude - depot[1]) > 0.0001 for v in vehicles[1:]):
+        raise HTTPException(422, "Selected vehicles must share a depot for this CVRP planner")
+    coords = [depot] + [(b.latitude, b.longitude) for b in bins]
+    demands = [0.0] + [job.demand_liters for job in jobs]
+    capacities = [v.capacity_liters for v in vehicles]
+    try:
+        matrix = await road_matrix(coords)
+        optimized = optimize_cvrp(matrix["distances_meters"], demands, capacities)
+        route_details = []
+        assigned_job_ids = set()
+        for route in optimized["routes"]:
+            vehicle = vehicles[route["vehicle_index"]]
+            ordered_nodes = [0] + route["stop_indices"] + [0]
+            ordered_coords = [coords[i] for i in ordered_nodes]
+            geometry = await road_route(ordered_coords) if route["stop_indices"] else {"distance_meters": 0, "duration_seconds": 0, "geometry": None}
+            route_jobs = []
+            for node in route["stop_indices"]:
+                job = jobs[node - 1]
+                previous = job.status
+                job.status = "assigned"
+                job.assigned_vehicle_id = vehicle.id
+                assigned_job_ids.add(job.id)
+                db.add(ServiceEvent(job_id=job.id, actor="dispatcher", previous_status=previous, new_status="assigned", note=f"Assigned by route plan to vehicle {vehicle.id}"))
+                route_jobs.append({"job_id": job.id, "bin_id": job.bin_id, "sequence": len(route_jobs) + 1, "demand_liters": job.demand_liters})
+            route_details.append({**route, "vehicle_id": vehicle.id, "ordered_bin_ids": [bins[i - 1].id for i in route["stop_indices"]], "jobs": route_jobs, "road_distance_meters": geometry["distance_meters"], "road_duration_seconds": geometry["duration_seconds"], "geometry": geometry["geometry"]})
+        if assigned_job_ids != {job.id for job in jobs}:
+            raise OptimizationError("Optimizer returned a route that omitted one or more approved jobs")
+    except RoutingError as exc:
+        db.rollback()
+        raise HTTPException(503, str(exc)) from exc
+    except (OptimizationError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc)) from exc
+    plan_id = str(uuid4())
+    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": "OSRM", "solver": optimized["solver"], "assigned_job_ids": sorted(assigned_job_ids), "data_mode": "approved jobs with fresh telemetry; verify sensor calibration before operational use"}
+    db.add(RoutePlan(id=plan_id, depot_latitude=depot[0], depot_longitude=depot[1], routing_provider="OSRM", solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
     db.commit()
     return {"route_plan_id": plan_id, **response_payload}
 

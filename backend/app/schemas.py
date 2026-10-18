@@ -60,3 +60,21 @@ class VehicleCreate(BaseModel):
 class JobAssign(BaseModel):
     vehicle_id: str = Field(min_length=1, max_length=80)
     actor: str = Field(min_length=1, max_length=100)
+
+class DispatchRequest(BaseModel):
+    job_ids: list[str] = Field(min_length=1, max_length=50)
+    vehicle_ids: list[str] | None = Field(default=None, min_length=1, max_length=20)
+
+    @field_validator("job_ids")
+    @classmethod
+    def unique_jobs(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("job_ids must not contain duplicates")
+        return value
+
+    @field_validator("vehicle_ids")
+    @classmethod
+    def unique_vehicles(cls, value):
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("vehicle_ids must not contain duplicates")
+        return value

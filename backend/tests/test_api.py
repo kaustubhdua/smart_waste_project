@@ -97,3 +97,39 @@ def test_operations_summary_and_job_events_are_persistent():
     assert events.status_code == 200
     assert events.json()[0]["new_status"] == "detected"
     assert client.get("/api/v1/jobs?status=unknown", headers=OP).status_code == 422
+
+def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
+    import asyncio
+    import app.main as main_module
+
+    async def fake_matrix(coords):
+        n = len(coords)
+        return {"distances_meters": [[0 if i == j else 100 + abs(i-j) * 20 for j in range(n)] for i in range(n)],
+                "durations_seconds": [[0 if i == j else 60 for j in range(n)] for i in range(n)]}
+
+    async def fake_route(coords):
+        return {"distance_meters": 320, "duration_seconds": 240, "geometry": {"type":"LineString","coordinates":[[77.2,28.6],[77.21,28.61]]}}
+
+    monkeypatch.setattr(main_module, "road_matrix", fake_matrix)
+    monkeypatch.setattr(main_module, "road_route", fake_route)
+    for bin_id, longitude in (("dispatch-a",77.20),("dispatch-b",77.21)):
+        b = {"id":bin_id,"latitude":28.6,"longitude":longitude,"capacity_liters":1000,"criticality":2,"source":"live"}
+        assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+        telemetry = {"bin_id":bin_id,"device_id":"device-"+bin_id,"message_id":"now-"+bin_id,"fill_percent":30,"measured_at":datetime.now(timezone.utc).isoformat()}
+        assert client.post("/api/v1/telemetry", json=telemetry, headers=DEVICE).status_code == 202
+    jobs = []
+    for bin_id in ("dispatch-a","dispatch-b"):
+        job = client.post("/api/v1/jobs", json={"bin_id":bin_id,"demand_liters":100}, headers=OP).json()
+        jobs.append(job["id"])
+        assert client.post(f"/api/v1/jobs/{job['id']}/transitions", json={"status":"approved","actor":"dispatcher"}, headers=OP).status_code == 200
+    vehicle = {"id":"dispatch-truck","capacity_liters":500,"depot_latitude":28.6,"depot_longitude":77.2}
+    assert client.post("/api/v1/vehicles", json=vehicle, headers=OP).status_code == 201
+    response = client.post("/api/v1/routes/dispatch", json={"job_ids":jobs,"vehicle_ids":["dispatch-truck"]}, headers=OP)
+    assert response.status_code == 200, response.text
+    assert sorted(response.json()["assigned_job_ids"]) == sorted(jobs)
+    for job_id in jobs:
+        persisted = client.get("/api/v1/jobs", headers=OP).json()
+        found = next(j for j in persisted if j["id"] == job_id)
+        assert found["status"] == "assigned"
+        assert found["assigned_vehicle_id"] == "dispatch-truck"
+    assert client.get("/health/ready").json()["status"] == "ready"

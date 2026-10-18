@@ -6,7 +6,7 @@
 - Validated telemetry ingestion with duplicate-message idempotency; reused message IDs with changed payloads return conflict.
 - Timezone-aware telemetry timestamps, future-clock-skew rejection and configurable freshness checks for demand estimation and route planning.
 - Operations summary for telemetry freshness, bin counts, active vehicles and job-state counts.
-- Collection job listing, service-event history, explicit state transitions and capacity-checked vehicle assignment.
+- Collection job listing, service-event history, explicit state transitions and capacity-checked vehicle assignment.\n- Dispatch endpoint optimizes approved jobs against registered vehicle capacities, persists the route plan, and assigns each job with an audit event in one database transaction.\n- Database readiness probe and placeholder-token rejection.
 - OSRM road distance/time matrix and route geometry integration.
 - OR-Tools capacitated vehicle routing over road-network distances with finite input validation.
 - Route optimization results persisted as route-plan records and retrievable from history.
