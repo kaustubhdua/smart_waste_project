@@ -2,6 +2,10 @@ from datetime import datetime, timezone
 import csv
 import io
 from math import exp
+from pathlib import Path
+from statistics import mean
+import joblib
+import pandas as pd
 import json
 from hmac import compare_digest
 from hashlib import sha256
@@ -39,6 +43,51 @@ def _priority_score(fill_percent: float, bin_row: Bin) -> float:
     time_weight = min(hours_elapsed / 48.0, 1.0)
     criticality_multiplier = {1: 0.8, 2: 0.9, 3: 1.0, 4: 1.15, 5: 1.3}.get(bin_row.criticality, 1.0)
     return round(min(100.0, max(0.0, (70.0 * fill_weight + 30.0 * time_weight) * criticality_multiplier)), 2)
+
+MODEL_FEATURES = ["capacity_liters", "temperature_c", "hour", "day_of_week", "is_weekend", "fill_lag_1h", "fill_lag_3h", "rolling_mean_6h"]
+
+def _load_forecast_artifact():
+    path = Path(settings.model_path)
+    if not path.is_file():
+        return None
+    artifact = joblib.load(path)
+    if isinstance(artifact, dict) and "model" in artifact:
+        return artifact
+    return {"model": artifact, "features": MODEL_FEATURES, "metrics": {"evaluation_note": "Legacy artifact; validation metadata unavailable."}}
+
+def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
+    artifact = artifact if artifact is not None else _load_forecast_artifact()
+    if artifact is None:
+        return None, "model_artifact_missing"
+    rows = list(db.scalars(select(Telemetry).where(Telemetry.bin_id == bin_row.id).order_by(Telemetry.measured_at.desc()).limit(6)))
+    rows.reverse()
+    if len(rows) < 3:
+        return None, "insufficient_history"
+    latest = rows[-1]
+    if _is_stale(latest.measured_at):
+        return None, "stale_telemetry"
+    if latest.temperature_c is None:
+        return None, "temperature_missing"
+    timestamp = _utc(latest.measured_at)
+    feature_row = {
+        "capacity_liters": bin_row.capacity_liters,
+        "temperature_c": latest.temperature_c,
+        "hour": timestamp.hour,
+        "day_of_week": timestamp.weekday(),
+        "is_weekend": int(timestamp.weekday() >= 5),
+        "fill_lag_1h": latest.fill_percent,
+        "fill_lag_3h": rows[-3].fill_percent,
+        "rolling_mean_6h": mean(row.fill_percent for row in rows[-6:]),
+    }
+    feature_names = artifact.get("features", MODEL_FEATURES)
+    missing = set(feature_names).difference(feature_row)
+    if missing:
+        raise ValueError(f"Model expects unsupported features: {sorted(missing)}")
+    frame = pd.DataFrame([{name: feature_row[name] for name in feature_names}])
+    prediction = float(artifact["model"].predict(frame)[0])
+    if not (-float("inf") < prediction < float("inf")):
+        raise ValueError("Model returned a non-finite prediction")
+    return min(100.0, max(0.0, prediction)), None
 
 def require_operator(authorization: str | None = Header(default=None)):
     expected = "Bearer " + settings.api_token
@@ -129,7 +178,7 @@ def ingest_telemetry(payload: TelemetryIn, x_device_token: str | None = Header(d
         db.rollback()
         existing = db.scalar(select(Telemetry).where(Telemetry.device_id == payload.device_id, Telemetry.message_id == payload.message_id))
         if existing:
-            same_payload = (existing.bin_id == payload.bin_id and existing.fill_percent == payload.fill_percent and _utc(existing.measured_at) == measured_at)
+            same_payload = (existing.bin_id == payload.bin_id and existing.fill_percent == payload.fill_percent and existing.temperature_c == payload.temperature_c and _utc(existing.measured_at) == measured_at)
             if not same_payload:
                 raise HTTPException(409, "Message ID was already used with a different payload")
             current_device = db.get(Device, payload.device_id)
@@ -169,7 +218,7 @@ async def import_telemetry_csv(file: UploadFile = File(...), db: Session = Depen
             if (measured_at - datetime.now(timezone.utc)).total_seconds() > settings.telemetry_future_skew_seconds:
                 raise HTTPException(422, detail={"row": row_number, "message": "Timestamp is too far in the future"})
             key = (event.device_id, event.message_id)
-            signature = (event.bin_id, event.fill_percent, measured_at)
+            signature = (event.bin_id, event.fill_percent, event.temperature_c, measured_at)
             if key in seen:
                 if seen[key] != signature:
                     raise HTTPException(409, detail={"row": row_number, "message": "Message ID reused with a different payload in this file"})
@@ -178,7 +227,7 @@ async def import_telemetry_csv(file: UploadFile = File(...), db: Session = Depen
             seen[key] = signature
             existing = db.scalar(select(Telemetry).where(Telemetry.device_id == event.device_id, Telemetry.message_id == event.message_id))
             if existing:
-                existing_signature = (existing.bin_id, existing.fill_percent, _utc(existing.measured_at))
+                existing_signature = (existing.bin_id, existing.fill_percent, existing.temperature_c, _utc(existing.measured_at))
                 if existing_signature != signature:
                     raise HTTPException(409, detail={"row": row_number, "message": "Message ID already exists with a different payload"})
                 duplicates += 1
@@ -205,6 +254,25 @@ def bin_history(bin_id: str, limit: int = 100, db: Session = Depends(get_db)):
     rows = db.scalars(select(Telemetry).where(Telemetry.bin_id == bin_id).order_by(Telemetry.measured_at.desc()).limit(max(1, min(limit, 500))))
     return [{"id": r.id, "fill_percent": r.fill_percent, "measured_at": r.measured_at, "received_at": r.received_at, "source": r.source} for r in rows]
 
+@app.get("/api/v1/forecasts", dependencies=[Depends(require_operator)])
+def list_forecasts(db: Session = Depends(get_db)):
+    artifact = _load_forecast_artifact()
+    if artifact is None:
+        raise HTTPException(503, "No trained model artifact found. Train it with python person2_ml_prediction.py first.")
+    results, skipped = [], []
+    for bin_row in db.scalars(select(Bin).where(Bin.active.is_(True)).order_by(Bin.id)):
+        try:
+            prediction, reason = _predict_next_fill_for_bin(db, bin_row, artifact)
+        except Exception as exc:
+            skipped.append({"bin_id": bin_row.id, "reason": "model_error", "detail": str(exc)})
+            continue
+        if reason:
+            skipped.append({"bin_id": bin_row.id, "reason": reason})
+            continue
+        latest = db.scalar(select(Telemetry).where(Telemetry.bin_id == bin_row.id).order_by(Telemetry.measured_at.desc()).limit(1))
+        results.append({"bin_id": bin_row.id, "predicted_next_fill_percent": round(prediction, 2), "latest_observed_fill_percent": latest.fill_percent, "measured_at": _utc(latest.measured_at), "model_target": artifact.get("target", "next observed fill"), "data_source": latest.source})
+    return {"predictions": results, "skipped": skipped, "model_metrics": artifact.get("metrics", {}), "forecast_semantics": "next observed fill level; not a validated 6/12-hour forecast", "model_artifact": settings.model_path}
+
 @app.post("/api/v1/jobs", dependencies=[Depends(require_operator)], status_code=201)
 def create_job(payload: JobCreate, db: Session = Depends(get_db)):
     bin_row = db.get(Bin, payload.bin_id)
@@ -217,14 +285,27 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
     if demand is None:
         if latest is None:
             raise HTTPException(422, "Demand is required when no telemetry exists")
-        demand = bin_row.capacity_liters * latest.fill_percent / 100
-    fill_for_priority = latest.fill_percent if latest is not None and not _is_stale(latest.measured_at) else 0.0
+        demand_fill = latest.fill_percent
+        demand_source = "latest_observed_telemetry"
+        if settings.use_model_for_dispatch:
+            try:
+                forecast_fill, reason = _predict_next_fill_for_bin(db, bin_row)
+            except Exception as exc:
+                raise HTTPException(503, f"Model prediction failed: {exc}") from exc
+            if reason:
+                raise HTTPException(422, f"Model-driven demand is enabled but forecast is unavailable: {reason}")
+            demand_fill = forecast_fill
+            demand_source = "model_next_observation"
+        demand = bin_row.capacity_liters * demand_fill / 100
+    else:
+        demand_source = "operator_supplied"
+    fill_for_priority = (demand * 100 / bin_row.capacity_liters) if demand_source == "model_next_observation" else (latest.fill_percent if latest is not None and not _is_stale(latest.measured_at) else 0.0)
     priority = payload.priority if payload.priority is not None else _priority_score(fill_for_priority, bin_row)
     job = CollectionJob(id=str(uuid4()), bin_id=payload.bin_id, demand_liters=demand, priority=priority)
     db.add(job)
     db.add(ServiceEvent(job_id=job.id, actor="system", previous_status="none", new_status="detected", note="Collection candidate created"))
     db.commit()
-    return {"id": job.id, "bin_id": job.bin_id, "status": job.status, "demand_liters": job.demand_liters, "priority": job.priority, "priority_method": "weighted heuristic"}
+    return {"id": job.id, "bin_id": job.bin_id, "status": job.status, "demand_liters": job.demand_liters, "priority": job.priority, "priority_method": "weighted heuristic", "demand_source": demand_source}
 
 ALLOWED = {
     "detected": {"approved", "exception"},

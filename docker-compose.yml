@@ -20,8 +20,12 @@ services:
       DATABASE_URL: postgresql+psycopg://smartwaste:${POSTGRES_PASSWORD}@db:5432/smartwaste
       API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
       OSRM_BASE_URL: ${OSRM_BASE_URL:-https://router.project-osrm.org}
+      MODEL_PATH: /models/waste_model.pkl
+      USE_MODEL_FOR_DISPATCH: ${USE_MODEL_FOR_DISPATCH:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       AUTO_CREATE_SCHEMA: ${AUTO_CREATE_SCHEMA:-false}
+    volumes:
+      - ./models:/models:ro
     ports:
       - "8000:8000"
     depends_on:
