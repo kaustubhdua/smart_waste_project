@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from hmac import compare_digest
 from uuid import uuid4
 from fastapi import FastAPI, Depends, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from .optimizer import optimize_cvrp, OptimizationError
 
 app = FastAPI(title="Smart Waste Operations API", version="1.1.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
 Base.metadata.create_all(bind=engine)
+app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Device-Token'])
 
 def require_operator(authorization: str | None = Header(default=None)):
     expected = "Bearer " + settings.api_token

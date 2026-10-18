@@ -21,10 +21,17 @@ services:
       API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
       DEVICE_TOKEN: ${DEVICE_TOKEN:?Set DEVICE_TOKEN in .env}
       OSRM_BASE_URL: ${OSRM_BASE_URL:-https://router.project-osrm.org}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
 volumes:
   waste_pgdata:

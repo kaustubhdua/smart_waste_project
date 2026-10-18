@@ -6,6 +6,6 @@ class Settings(BaseSettings):
     api_token: str = "change-me-before-deployment"
     device_token: str = "change-me-device-token"
     osrm_base_url: str = "https://router.project-osrm.org"
-    require_road_routing: bool = True
+    cors_origins: str = "http://localhost:8080,http://127.0.0.1:8080"
 
 settings = Settings()
