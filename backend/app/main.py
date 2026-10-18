@@ -352,7 +352,9 @@ def job_events(job_id: str, db: Session = Depends(get_db)):
     if not db.get(CollectionJob, job_id):
         raise HTTPException(404, "Unknown job")
     rows = db.scalars(select(ServiceEvent).where(ServiceEvent.job_id == job_id).order_by(ServiceEvent.created_at, ServiceEvent.id))
-    return [{"id": e.id, "actor": e.actor, "previous_status": e.previous_status, "new_status": e.new_status, "note": e.note, "created_at": e.created_at} @app.get("/api/v1/operations/summary", dependencies=[Depends(require_operator)])
+    return [{"id": e.id, "actor": e.actor, "previous_status": e.previous_status, "new_status": e.new_status, "note": e.note, "created_at": e.created_at} for e in rows]
+
+@app.get("/api/v1/operations/summary", dependencies=[Depends(require_operator)])
 def operations_summary(db: Session = Depends(get_db)):
     """Return dashboard counts using aggregates rather than loading every historical row."""
     now = datetime.now(timezone.utc)
@@ -389,8 +391,6 @@ def operations_summary(db: Session = Depends(get_db)):
         "vehicles_active": active_vehicles,
         "telemetry_stale_after_minutes": settings.telemetry_stale_after_minutes,
         "data_is_simulated": active_bins > 0 and non_demo_bins == 0 and non_demo_telemetry == 0,
-    }
-ry_rows),
     }
 
 @app.post("/api/v1/vehicles", dependencies=[Depends(require_operator)], status_code=201)
