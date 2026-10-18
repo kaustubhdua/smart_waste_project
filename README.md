@@ -21,14 +21,14 @@ A waste-collection engineering project combining time-series feature engineering
 The platform foundation lives in the backend and web directories. It includes FastAPI, PostgreSQL/PostGIS, telemetry persistence, job lifecycle events, OSRM road-network costs, OR-Tools route optimization, Alembic schema migrations, and an API-connected operator console.
 
 1. Copy .env.example to .env.
-2. Replace all placeholder secrets with unique random values.
+2. Replace both placeholder secrets with unique random values.
 3. Start the services:
 
     docker compose up --build
 
 4. Open the operator console at http://localhost:8080, API docs at http://localhost:8000/docs, and health check at http://localhost:8000/health.
 
-Enter the configured API_TOKEN in the operator console. For a real device, send authenticated readings to POST /api/v1/telemetry with X-Device-Token, a registered bin_id, a unique message_id, calibrated fill_percent, and an ISO timestamp. The UI does not invent missing telemetry.
+Enter the configured API_TOKEN in the operator console. Enroll each device through POST /api/v1/devices. Store the returned X-Device-Token securely; only its hash is persisted. Send readings to POST /api/v1/telemetry with the enrolled device_id, its bound bin_id, a unique message_id, calibrated fill_percent, and a timezone-aware ISO timestamp. Device credentials can be rotated or revoked. The UI does not invent missing telemetry.
 
 Route optimization uses the OSRM road-distance matrix and OR-Tools capacity constraints. The public OSRM endpoint is only suitable for development; use a contracted or self-hosted routing provider for a deployed service.
 
@@ -82,6 +82,10 @@ The Streamlit route solver remains a legacy demonstration that uses approximate 
 |---|---|---|
 | POST | /api/v1/bins | Register a bin |
 | GET | /api/v1/bins | List active bins |
+| POST | /api/v1/devices | Enroll a device and issue its one-time token |
+| GET | /api/v1/devices | List device status without revealing tokens |
+| POST | /api/v1/devices/{device_id}/rotate-token | Rotate a device credential |
+| DELETE | /api/v1/devices/{device_id} | Revoke a device credential |
 | POST | /api/v1/telemetry | Ingest a device reading |
 | GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |\n| GET | /api/v1/operations/summary | Inspect freshness and job-state counts |\n| GET | /api/v1/jobs | List collection jobs, optionally filtered by status |\n| GET | /api/v1/jobs/{job_id}/events | Inspect service history |\n| POST | /api/v1/vehicles | Register a collection vehicle |\n| POST | /api/v1/jobs/{job_id}/assign | Assign a job to a capacity-checked vehicle |
 | POST | /api/v1/jobs | Create a collection candidate |
