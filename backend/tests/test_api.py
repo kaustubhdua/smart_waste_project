@@ -39,7 +39,7 @@ def test_bin_and_idempotent_telemetry():
 
 def test_invalid_fill_rejected():
     event = {"bin_id":"missing","device_id":"d","message_id":"m","fill_percent":101,"measured_at":"2026-01-01T10:00:00Z"}
-    assert client.post("/api/v1/telemetry", json=event, headers=DEVICE).status_code == 422
+    assert client.post("/api/v1/telemetry", json=event, headers={}).status_code == 422
 
 def test_collection_job_state_machine_and_history():
     b = {"id":"bin-job","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}

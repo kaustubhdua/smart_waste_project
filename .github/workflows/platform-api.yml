@@ -25,7 +25,6 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}/backend
       API_TOKEN: test-operator-token
-      DEVICE_TOKEN: test-device-token
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
