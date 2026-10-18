@@ -1,15 +1,58 @@
+"""Typed application configuration and production safety checks."""
+from urllib.parse import urlparse
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    app_env: str = "development"
     database_url: str = "sqlite:///./smart_waste.db"
     api_token: str = "change-me-before-deployment"
     osrm_base_url: str = "https://router.project-osrm.org"
     cors_origins: str = "http://localhost:8080,http://127.0.0.1:8080"
     auto_create_schema: bool = True
+    seed_demo_data: bool = True
     telemetry_stale_after_minutes: int = 180
     telemetry_future_skew_seconds: int = 300
     model_path: str = "../models/waste_model.pkl"
     use_model_for_dispatch: bool = False
 
+
+def validate_production_settings(config: Settings) -> None:
+    """Fail closed on common unsafe production configuration mistakes.
+
+    Development remains frictionless for local SQLite/tests. Production must
+    explicitly configure durable storage, migrations, secrets, origins and
+    demo-data policy rather than inheriting development defaults.
+    """
+    if config.app_env.strip().lower() != "production":
+        return
+
+    errors: list[str] = []
+    if config.database_url.strip().lower().startswith("sqlite"):
+        errors.append("DATABASE_URL must use a durable production database")
+    if config.api_token.startswith(("change-me", "replace-with")) or len(config.api_token) < 32:
+        errors.append("API_TOKEN must be a unique secret of at least 32 characters")
+    if config.auto_create_schema:
+        errors.append("AUTO_CREATE_SCHEMA must be false; use Alembic migrations")
+    if config.seed_demo_data:
+        errors.append("SEED_DEMO_DATA must be false in production")
+
+    origins = [origin.strip() for origin in config.cors_origins.split(",") if origin.strip()]
+    if not origins or "*" in origins:
+        errors.append("CORS_ORIGINS must explicitly list trusted HTTPS origins")
+    else:
+        for origin in origins:
+            parsed = urlparse(origin)
+            if parsed.scheme != "https" or not parsed.netloc or parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
+                errors.append("CORS_ORIGINS may contain only explicit HTTPS production origins")
+                break
+
+    if errors:
+        raise RuntimeError("Unsafe production configuration: " + "; ".join(errors))
+
+
 settings = Settings()
+validate_production_settings(settings)
