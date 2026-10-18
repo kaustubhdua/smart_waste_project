@@ -1,0 +1,76 @@
+name: Platform API
+on:
+  push:
+    paths:
+      - "backend/**"
+      - ".github/workflows/platform-api.yml"
+      - "web/**"
+      - "docker-compose.yml"
+      - "docs/**"
+      - "README.md"
+      - "README_PLATFORM.md"
+      - "person2_ml_prediction.py"
+      - "requirements.txt"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/platform-api.yml"
+      - "person2_ml_prediction.py"
+      - "person3_fuzzy_logic.py"
+      - "app.py"
+      - "tests/**"
+      - "web/**"
+      - "docker-compose.yml"
+      - "docs/**"
+      - "README.md"
+      - "README_PLATFORM.md"
+      - "person2_ml_prediction.py"
+      - "requirements.txt"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PYTHONPATH: ${{ github.workspace }}/backend
+      API_TOKEN: test-operator-token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+      - name: Verify schema migration from an empty database
+        run: DATABASE_URL=sqlite:///./migration_test.db alembic upgrade head
+      - run: python -m compileall -q app scripts
+      - name: Verify demo seed is idempotent
+        run: DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo && DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo
+      - name: Validate Docker Compose configuration
+        working-directory: ${{ github.workspace }}
+        run: POSTGRES_PASSWORD=ci-only-password API_TOKEN=ci-only-operator-token docker compose config --quiet
+      - name: Build API and web containers
+        working-directory: ${{ github.workspace }}
+        run: POSTGRES_PASSWORD=ci-only-password API_TOKEN=ci-only-operator-token docker compose build
+      - name: Validate operator and driver browser JavaScript syntax
+        working-directory: ${{ github.workspace }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          for name in ("index", "driver"):
+              html = Path(f"web/{name}.html").read_text()
+              scripts = [script for script in re.findall(r"<script>(.*?)</script>", html, re.S) if script.strip()]
+              assert scripts, f"No inline JavaScript found in web/{name}.html"
+              Path(f"/tmp/{name}.js").write_text("\n".join(scripts))
+          PY
+          node --check /tmp/index.js
+          node --check /tmp/driver.js
