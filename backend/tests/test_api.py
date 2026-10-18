@@ -277,3 +277,66 @@ def test_device_revocation_supports_browser_cors_preflight():
     )
     assert response.status_code == 200
     assert "DELETE" in response.headers.get("access-control-allow-methods", "")
+
+
+def test_driver_workflow_is_vehicle_scoped_and_tokens_rotate():
+    bin_payload = {"id":"bin-driver-flow","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":3,"source":"demo"}
+    assert client.post("/api/v1/bins", json=bin_payload, headers=OP).status_code == 201
+    vehicle_payload = {"id":"truck-driver-flow","capacity_liters":500,"depot_latitude":28.6,"depot_longitude":77.2}
+    assert client.post("/api/v1/vehicles", json=vehicle_payload, headers=OP).status_code == 201
+    registered = client.post("/api/v1/drivers", json={"id":"driver-flow","vehicle_id":"truck-driver-flow"}, headers=OP)
+    assert registered.status_code == 201, registered.text
+    driver_token = registered.json()["token"]
+    driver_headers = {"X-Driver-Id":"driver-flow","X-Driver-Token":driver_token}
+
+    created = client.post("/api/v1/jobs", json={"bin_id":"bin-driver-flow","demand_liters":100}, headers=OP)
+    assert created.status_code == 201, created.text
+    job_id = created.json()["id"]
+    approved = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"approved","actor":"operator"}, headers=OP)
+    assert approved.status_code == 200
+    assigned = client.post(f"/api/v1/jobs/{job_id}/assign", json={"vehicle_id":"truck-driver-flow","actor":"operator"}, headers=OP)
+    assert assigned.status_code == 200
+
+    jobs = client.get("/api/v1/driver/jobs", headers=driver_headers)
+    assert jobs.status_code == 200
+    assert [job["id"] for job in jobs.json()] == [job_id]
+    assert client.get("/api/v1/driver/jobs", headers={"X-Driver-Id":"driver-flow","X-Driver-Token":"wrong"}).status_code == 401
+
+    started = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"in_progress","note":"started"}, headers=driver_headers)
+    assert started.status_code == 200
+    completed = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"completed","note":"collected"}, headers=driver_headers)
+    assert completed.status_code == 200
+    assert client.get("/api/v1/driver/jobs", headers=driver_headers).json() == []
+
+    verified = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"verified","actor":"operator"}, headers=OP)
+    assert verified.status_code == 200
+    vehicle = client.get("/api/v1/vehicles", headers=OP).json()[0]
+    assert vehicle["available"] is True
+    events = client.get(f"/api/v1/jobs/{job_id}/events", headers=OP).json()
+    assert any(event["actor"] == "driver:driver-flow" and event["new_status"] == "completed" for event in events)
+
+    rotated = client.post("/api/v1/drivers/driver-flow/rotate-token", headers=OP)
+    assert rotated.status_code == 200
+    assert client.get("/api/v1/driver/jobs", headers=driver_headers).status_code == 401
+    new_headers = {"X-Driver-Id":"driver-flow","X-Driver-Token":rotated.json()["token"]}
+    assert client.get("/api/v1/driver/jobs", headers=new_headers).status_code == 200
+
+
+def test_driver_cannot_transition_a_job_assigned_to_another_vehicle():
+    bin_payload = {"id":"bin-driver-scope","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":3,"source":"demo"}
+    assert client.post("/api/v1/bins", json=bin_payload, headers=OP).status_code == 201
+    for vehicle_id in ("truck-owner","truck-other"):
+        payload = {"id":vehicle_id,"capacity_liters":500,"depot_latitude":28.6,"depot_longitude":77.2}
+        assert client.post("/api/v1/vehicles", json=payload, headers=OP).status_code == 201
+    owner = client.post("/api/v1/drivers", json={"id":"driver-owner","vehicle_id":"truck-owner"}, headers=OP).json()
+    other = client.post("/api/v1/drivers", json={"id":"driver-other","vehicle_id":"truck-other"}, headers=OP).json()
+    job = client.post("/api/v1/jobs", json={"bin_id":"bin-driver-scope","demand_liters":100}, headers=OP).json()
+    assert client.post(f"/api/v1/jobs/{job['id']}/transitions", json={"status":"approved","actor":"operator"}, headers=OP).status_code == 200
+    assert client.post(f"/api/v1/jobs/{job['id']}/assign", json={"vehicle_id":"truck-owner","actor":"operator"}, headers=OP).status_code == 200
+    response = client.post(
+        f"/api/v1/driver/jobs/{job['id']}/transition",
+        json={"status":"in_progress"},
+        headers={"X-Driver-Id":"driver-other","X-Driver-Token":other["token"]},
+    )
+    assert response.status_code == 403
+    assert client.get("/api/v1/driver/jobs", headers={"X-Driver-Id":"driver-owner","X-Driver-Token":owner["token"]}).json()[0]["id"] == job["id"]
