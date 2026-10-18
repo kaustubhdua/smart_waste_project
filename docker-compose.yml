@@ -17,6 +17,7 @@ services:
   api:
     build: ./backend
     environment:
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: postgresql+psycopg://smartwaste:${POSTGRES_PASSWORD}@db:5432/smartwaste
       API_TOKEN: ${API_TOKEN:?Set API_TOKEN in .env}
       OSRM_BASE_URL: ${OSRM_BASE_URL:-https://router.project-osrm.org}
