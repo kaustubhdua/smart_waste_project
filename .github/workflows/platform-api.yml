@@ -51,6 +51,12 @@ jobs:
       - name: Verify schema migration from an empty database
         run: DATABASE_URL=sqlite:///./migration_test.db alembic upgrade head
       - run: python -m compileall -q app
+      - name: Validate Docker Compose configuration
+        working-directory: ${{ github.workspace }}
+        run: POSTGRES_PASSWORD=ci-only-password API_TOKEN=ci-only-operator-token docker compose config --quiet
+      - name: Build API and web containers
+        working-directory: ${{ github.workspace }}
+        run: POSTGRES_PASSWORD=ci-only-password API_TOKEN=ci-only-operator-token docker compose build
       - name: Validate operator and driver browser JavaScript syntax
         working-directory: ${{ github.workspace }}
         run: |
