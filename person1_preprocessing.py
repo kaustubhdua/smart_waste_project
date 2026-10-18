@@ -85,10 +85,7 @@ def preprocess_data(df):
         lambda x: x.shift(1).rolling(6, min_periods=1).mean()
     )
 
-    # The first observation for each bin has no historical features. Fill only
-    # from that bin's later observations, never across bin boundaries.
-    feature_columns = ["fill_lag_1h", "fill_lag_3h", "rolling_mean_6h"]
-    for column in feature_columns:
-        df[column] = df.groupby("bin_id")[column].transform(lambda x: x.bfill())
-
+    # Leave insufficient-history rows missing. Backfilling from later rows
+    # would leak future fill values into features for earlier prediction times.
+    # The model-training path drops rows without complete historical features.
     return df

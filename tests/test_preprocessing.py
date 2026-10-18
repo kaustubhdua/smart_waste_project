@@ -26,6 +26,10 @@ class PreprocessingTests(unittest.TestCase):
         result = preprocess_data(pd.DataFrame(rows))
         first_bin = result[result["bin_id"] == "BIN_001"].reset_index(drop=True)
 
+        self.assertTrue(pd.isna(first_bin.loc[0, "fill_lag_1h"]))
+        self.assertTrue(pd.isna(first_bin.loc[0, "fill_lag_3h"]))
+        self.assertTrue(pd.isna(first_bin.loc[0, "rolling_mean_6h"]))
+        self.assertTrue(pd.isna(first_bin.loc[1, "fill_lag_3h"]))
         self.assertEqual(first_bin.loc[1, "fill_lag_1h"], 10)
         self.assertEqual(first_bin.loc[3, "fill_lag_3h"], 10)
         self.assertEqual(first_bin.loc[1, "rolling_mean_6h"], 10)
@@ -51,6 +55,7 @@ class PreprocessingTests(unittest.TestCase):
 
         result = preprocess_data(pd.DataFrame(rows))
         second_bin = result[result["bin_id"] == "BIN_002"].reset_index(drop=True)
+        self.assertTrue(pd.isna(second_bin.loc[0, "fill_lag_1h"]))
         self.assertEqual(second_bin.loc[1, "fill_lag_1h"], 90)
         self.assertEqual(second_bin.loc[1, "rolling_mean_6h"], 90)
 
