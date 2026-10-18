@@ -156,6 +156,9 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
         assert completed.status_code == 200
         verified = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"verified","actor":"operator"}, headers=OP)
         assert verified.status_code == 200
+        availability = next(v for v in client.get("/api/v1/vehicles", headers=OP).json() if v["id"] == "dispatch-truck")["available"]
+        if job_id != jobs[-1]:
+            assert availability is False
     assert client.get("/api/v1/driver/jobs", headers=driver_headers).json() == []
     assert next(v for v in client.get("/api/v1/vehicles", headers=OP).json() if v["id"] == "dispatch-truck")["available"] is True
 

@@ -98,6 +98,7 @@ def _release_vehicle_if_idle(db: Session, vehicle_id: str | None):
     vehicle = db.get(Vehicle, vehicle_id)
     if not vehicle:
         return
+    db.flush()
     active_job = db.scalar(select(CollectionJob.id).where(
         CollectionJob.assigned_vehicle_id == vehicle_id,
         CollectionJob.status.in_(["assigned", "in_progress", "completed"]),
