@@ -33,8 +33,14 @@ def test_production_configuration_accepts_explicit_safe_settings():
         {"cors_origins": "http://ops.example.com"},
         {"cors_origins": "http://localhost:8080"},
         {"cors_origins": ""},
+        {"cors_origins": "https://ops.example.com/admin"},
+        {"cors_origins": "https://ops.example.com?next=drivers"},
+        {"cors_origins": "https://user:pass@ops.example.com"},
+        {"cors_origins": "https://ops.example.com#fragment"},
         {"osrm_base_url": "https://router.project-osrm.org"},
         {"osrm_base_url": "http://routing.example.com"},
+        {"osrm_base_url": "https://user:pass@routing.example.com"},
+        {"osrm_base_url": "https://routing.example.com?token=secret"},
     ],
 )
 def test_production_configuration_rejects_unsafe_settings(override):
