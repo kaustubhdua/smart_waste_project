@@ -47,13 +47,19 @@ def validate_production_settings(config: Settings) -> None:
         errors.append("SEED_DEMO_DATA must be false in production")
 
     routing_url = urlparse(config.osrm_base_url.strip())
+    try:
+        routing_port = routing_url.port
+    except ValueError:
+        routing_port = -1
     if (
         routing_url.scheme != "https"
         or not routing_url.hostname
+        or routing_port == -1
         or routing_url.username is not None
         or routing_url.password is not None
         or routing_url.query
         or routing_url.fragment
+        or any(character.isspace() for character in routing_url.netloc)
         or routing_url.hostname.lower() in {"router.project-osrm.org", "routing.openstreetmap.de"}
     ):
         errors.append(
@@ -66,15 +72,21 @@ def validate_production_settings(config: Settings) -> None:
     else:
         for origin in origins:
             parsed = urlparse(origin)
+            try:
+                origin_port = parsed.port
+            except ValueError:
+                origin_port = -1
             if (
                 parsed.scheme != "https"
                 or not parsed.hostname
+                or origin_port == -1
                 or parsed.username is not None
                 or parsed.password is not None
                 or parsed.path != ""
                 or parsed.params
                 or parsed.query
                 or parsed.fragment
+                or any(character.isspace() for character in parsed.netloc)
                 or parsed.hostname.lower() in {"localhost", "127.0.0.1", "::1"}
             ):
                 errors.append(
