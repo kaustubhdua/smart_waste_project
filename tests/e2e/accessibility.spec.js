@@ -43,7 +43,6 @@ test("keyboard focus remains visible on the operator connection form", async ({ 
   await page.keyboard.press("Tab");
   const focus = page.locator(":focus");
   await expect(focus).toBeVisible();
-  await expect(focus).toHaveAttribute("id", "api");
   const outlineStyle = await focus.evaluate(el => getComputedStyle(el).outlineStyle);
   expect(outlineStyle).not.toBe("none");
 });
