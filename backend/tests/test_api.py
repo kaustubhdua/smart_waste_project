@@ -356,3 +356,83 @@ def test_driver_cannot_transition_a_job_assigned_to_another_vehicle():
     )
     assert response.status_code == 403
     assert client.get("/api/v1/driver/jobs", headers={"X-Driver-Id":"driver-owner","X-Driver-Token":owner["token"]}).json()[0]["id"] == job["id"]
+
+
+
+def test_dispatch_rolls_back_assignments_when_route_geometry_fails(monkeypatch):
+    import app.main as main_module
+    from app.routing import RoutingError
+
+    async def fake_matrix(coords):
+        n = len(coords)
+        return {
+            "distances_meters": [[0 if i == j else 100 + abs(i - j) * 20 for j in range(n)] for i in range(n)],
+            "durations_seconds": [[0 if i == j else 60 for j in range(n)] for i in range(n)],
+        }
+
+    async def failing_route(coords):
+        raise RoutingError("test route geometry outage")
+
+    monkeypatch.setattr(main_module, "road_matrix", fake_matrix)
+    monkeypatch.setattr(main_module, "road_route", failing_route)
+
+    bin_payload = {
+        "id": "dispatch-rollback-bin",
+        "latitude": 28.6,
+        "longitude": 77.2,
+        "capacity_liters": 1000,
+        "criticality": 3,
+        "source": "live",
+    }
+    assert client.post("/api/v1/bins", json=bin_payload, headers=OP).status_code == 201
+    device_headers = register_device("dispatch-rollback-device", "dispatch-rollback-bin")
+    telemetry = {
+        "bin_id": "dispatch-rollback-bin",
+        "device_id": "dispatch-rollback-device",
+        "message_id": "dispatch-rollback-reading",
+        "fill_percent": 35,
+        "measured_at": datetime.now(timezone.utc).isoformat(),
+    }
+    assert client.post("/api/v1/telemetry", json=telemetry, headers=device_headers).status_code == 202
+
+    created = client.post(
+        "/api/v1/jobs",
+        json={"bin_id": "dispatch-rollback-bin", "demand_liters": 200},
+        headers=OP,
+    )
+    assert created.status_code == 201
+    job_id = created.json()["id"]
+    approved = client.post(
+        f"/api/v1/jobs/{job_id}/transitions",
+        json={"status": "approved", "actor": "operator"},
+        headers=OP,
+    )
+    assert approved.status_code == 200
+
+    vehicle = {
+        "id": "dispatch-rollback-truck",
+        "capacity_liters": 500,
+        "depot_latitude": 28.6,
+        "depot_longitude": 77.2,
+    }
+    assert client.post("/api/v1/vehicles", json=vehicle, headers=OP).status_code == 201
+
+    response = client.post(
+        "/api/v1/routes/dispatch",
+        json={"job_ids": [job_id], "vehicle_ids": ["dispatch-rollback-truck"]},
+        headers=OP,
+    )
+    assert response.status_code == 503
+
+    jobs = client.get("/api/v1/jobs", headers=OP).json()
+    persisted_job = next(job for job in jobs if job["id"] == job_id)
+    assert persisted_job["status"] == "approved"
+    assert persisted_job["assigned_vehicle_id"] is None
+
+    vehicles = client.get("/api/v1/vehicles", headers=OP).json()
+    persisted_vehicle = next(vehicle for vehicle in vehicles if vehicle["id"] == "dispatch-rollback-truck")
+    assert persisted_vehicle["available"] is True
+
+    events = client.get(f"/api/v1/jobs/{job_id}/events", headers=OP).json()
+    assert [event["new_status"] for event in events] == ["detected", "approved"]
+    assert client.get("/api/v1/routes/plans", headers=OP).json() == []
