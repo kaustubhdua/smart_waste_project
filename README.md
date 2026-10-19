@@ -28,6 +28,8 @@ A full-stack waste-operations engineering prototype combining IoT telemetry, col
 - [API overview](#api-overview)
 - [Testing](#testing)
 - [Security and deployment](#security-and-deployment)
+- [Production deployment runbook](docs/DEPLOYMENT_RUNBOOK.md)
+- [Security threat model](docs/SECURITY_THREAT_MODEL.md)
 - [Known limitations](#known-limitations)
 - [Repository map](#repository-map)
 
