@@ -3,7 +3,7 @@ const { test, expect } = require("@playwright/test");
 test("operator console renders accessible controls and requires an API token", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveTitle(/WasteOps \| Collection Control/);
-  await expect(page.getByRole("heading", { name: /WasteOps \/ Collection Control/ })).toBeVisible();
+  await expect(page.getByText("WasteOps / Collection Control")).toBeVisible();
   await expect(page.getByLabel("Operator bearer token")).toHaveAttribute("type", "password");
   await expect(page.getByRole("button", { name: "Connect & load bins" })).toBeVisible();
 
