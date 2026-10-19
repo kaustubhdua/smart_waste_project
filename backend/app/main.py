@@ -99,9 +99,11 @@ def _release_vehicle_if_idle(db: Session, vehicle_id: str | None):
     if not vehicle:
         return
     db.flush()
+    # A completed stop no longer occupies a vehicle; only work still being
+    # serviced should keep the vehicle unavailable. Verified jobs are historical.
     active_job = db.scalar(select(CollectionJob.id).where(
         CollectionJob.assigned_vehicle_id == vehicle_id,
-        CollectionJob.status.in_(["assigned", "in_progress", "completed"]),
+        CollectionJob.status.in_(["assigned", "in_progress"]),
     ).limit(1))
     if active_job is None:
         vehicle.available = True
@@ -441,10 +443,11 @@ def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get
     previous = job.status
     previous_vehicle_id = job.assigned_vehicle_id
     job.status = payload.status
-    if payload.status == "verified":
-        bin_row = db.get(Bin, job.bin_id)
-        if bin_row:
-            bin_row.last_emptied_at = datetime.now(timezone.utc)
+    if payload.status in {"completed", "verified"}:
+        if payload.status == "verified":
+            bin_row = db.get(Bin, job.bin_id)
+            if bin_row:
+                bin_row.last_emptied_at = datetime.now(timezone.utc)
         _release_vehicle_if_idle(db, previous_vehicle_id)
     elif payload.status == "exception":
         _release_vehicle_if_idle(db, previous_vehicle_id)
@@ -569,6 +572,7 @@ def driver_transition(job_id: str, payload: DriverTransition, x_driver_id: str |
         bin_row = db.get(Bin, job.bin_id)
         if bin_row:
             bin_row.last_emptied_at = datetime.now(timezone.utc)
+        _release_vehicle_if_idle(db, driver.vehicle_id)
     if payload.status == "exception":
         _release_vehicle_if_idle(db, driver.vehicle_id)
     db.add(ServiceEvent(job_id=job.id, actor="driver:" + driver.id, previous_status=previous, new_status=payload.status, note=payload.note))

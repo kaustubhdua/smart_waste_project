@@ -307,6 +307,9 @@ def test_driver_workflow_is_vehicle_scoped_and_tokens_rotate():
     completed = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"completed","note":"collected"}, headers=driver_headers)
     assert completed.status_code == 200
     assert client.get("/api/v1/driver/jobs", headers=driver_headers).json() == []
+    # Completion releases an idle vehicle immediately; verification is a later audit step.
+    available_after_completion = client.get("/api/v1/vehicles", headers=OP).json()[0]
+    assert available_after_completion["available"] is True
 
     verified = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"verified","actor":"operator"}, headers=OP)
     assert verified.status_code == 200

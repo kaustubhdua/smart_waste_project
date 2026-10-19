@@ -9,7 +9,7 @@
 - Model artifact loading and an API endpoint for next-observation fill predictions when enough recent readings and temperature values are available.
 - Optional model-assisted collection demand, disabled by default; priority uses a clearly documented weighted heuristic and real service-history timing when available.
 - OSRM road-distance matrix and geometry plus OR-Tools capacity-constrained optimization. The dispatch endpoint optimizes approved jobs against registered vehicles, persists the route plan, and assigns stops with service events transactionally.
-- Online driver view with vehicle-scoped jobs, external navigation handoff, start/complete/exception actions and driver credential enrollment.
+- Online driver view with vehicle-scoped jobs, external navigation handoff, start/complete/exception actions and driver credential enrollment; completed work releases idle vehicles, and the operator console can verify completed jobs.
 - Operator console for bins, device enrollment, vehicles, jobs, approval, route dispatch and optional model forecasts.
 - Explicitly labeled demo seed data for local development; CI verifies that seeding is idempotent.
 - Production-mode startup guardrails that reject SQLite, weak/placeholder operator tokens, automatic schema creation, demo seeding and non-HTTPS/wildcard CORS settings.
