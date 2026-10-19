@@ -33,8 +33,14 @@ def validate_production_settings(config: Settings) -> None:
     errors: list[str] = []
     if config.database_url.strip().lower().startswith("sqlite"):
         errors.append("DATABASE_URL must use a durable production database")
-    if config.api_token.startswith(("change-me", "replace-with")) or len(config.api_token) < 32:
-        errors.append("API_TOKEN must be a unique secret of at least 32 characters")
+    token = config.api_token
+    if (
+        token.lower().startswith(("change-me", "replace-with"))
+        or len(token) < 32
+        or not token.strip()
+        or any(character.isspace() for character in token)
+    ):
+        errors.append("API_TOKEN must be a unique secret of at least 32 characters without whitespace or placeholder text")
     if config.auto_create_schema:
         errors.append("AUTO_CREATE_SCHEMA must be false; use Alembic migrations")
     if config.seed_demo_data:
@@ -43,8 +49,12 @@ def validate_production_settings(config: Settings) -> None:
     routing_url = urlparse(config.osrm_base_url.strip())
     if (
         routing_url.scheme != "https"
-        or not routing_url.netloc
-        or routing_url.hostname in {"router.project-osrm.org", "routing.openstreetmap.de"}
+        or not routing_url.hostname
+        or routing_url.username is not None
+        or routing_url.password is not None
+        or routing_url.query
+        or routing_url.fragment
+        or routing_url.hostname.lower() in {"router.project-osrm.org", "routing.openstreetmap.de"}
     ):
         errors.append(
             "OSRM_BASE_URL must be a trusted HTTPS routing provider; public demo routers are not production services"
@@ -56,8 +66,20 @@ def validate_production_settings(config: Settings) -> None:
     else:
         for origin in origins:
             parsed = urlparse(origin)
-            if parsed.scheme != "https" or not parsed.netloc or parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
-                errors.append("CORS_ORIGINS may contain only explicit HTTPS production origins")
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path != ""
+                or parsed.params
+                or parsed.query
+                or parsed.fragment
+                or parsed.hostname.lower() in {"localhost", "127.0.0.1", "::1"}
+            ):
+                errors.append(
+                    "CORS_ORIGINS must contain only exact HTTPS origins (scheme, host and optional port; no credentials, path, query or fragment)"
+                )
                 break
 
     if errors:
