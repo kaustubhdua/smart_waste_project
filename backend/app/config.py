@@ -43,8 +43,12 @@ def validate_production_settings(config: Settings) -> None:
     routing_url = urlparse(config.osrm_base_url.strip())
     if (
         routing_url.scheme != "https"
-        or not routing_url.netloc
-        or routing_url.hostname in {"router.project-osrm.org", "routing.openstreetmap.de"}
+        or not routing_url.hostname
+        or routing_url.username is not None
+        or routing_url.password is not None
+        or routing_url.query
+        or routing_url.fragment
+        or routing_url.hostname.lower() in {"router.project-osrm.org", "routing.openstreetmap.de"}
     ):
         errors.append(
             "OSRM_BASE_URL must be a trusted HTTPS routing provider; public demo routers are not production services"
@@ -56,8 +60,20 @@ def validate_production_settings(config: Settings) -> None:
     else:
         for origin in origins:
             parsed = urlparse(origin)
-            if parsed.scheme != "https" or not parsed.netloc or parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
-                errors.append("CORS_ORIGINS may contain only explicit HTTPS production origins")
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in ("", "/")
+                or parsed.params
+                or parsed.query
+                or parsed.fragment
+                or parsed.hostname.lower() in {"localhost", "127.0.0.1", "::1"}
+            ):
+                errors.append(
+                    "CORS_ORIGINS must contain only exact HTTPS origins (scheme, host and optional port; no credentials, path, query or fragment)"
+                )
                 break
 
     if errors:
