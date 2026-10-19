@@ -415,12 +415,14 @@ def assign_job(job_id: str, payload: JobAssign, db: Session = Depends(get_db)):
     vehicle = db.scalar(select(Vehicle).where(Vehicle.id == payload.vehicle_id).with_for_update())
     if not job:
         raise HTTPException(404, "Unknown job")
+    # Assignment must not bypass explicit operator approval. Exception jobs must
+    # be re-approved through the lifecycle endpoint before reassignment.
+    if job.status != "approved":
+        raise HTTPException(409, f"Job must be approved before assignment (current: {job.status})")
     if not vehicle or not vehicle.active:
         raise HTTPException(404, "Unknown or inactive vehicle")
     if not vehicle.available:
         raise HTTPException(409, "Vehicle is already assigned to an active route")
-    if job.status not in {"detected", "approved", "exception"}:
-        raise HTTPException(409, f"Job cannot be assigned from status {job.status}")
     if job.demand_liters > vehicle.capacity_liters:
         raise HTTPException(422, "Job demand exceeds vehicle capacity")
     previous = job.status
