@@ -41,7 +41,7 @@ Install the pinned root requirements and launch:
     pip install -r requirements.txt
     streamlit run app.py
 
-The Streamlit route solver remains a legacy demonstration that uses approximate coordinate costs; the backend route optimizer is the road-network implementation. The ML model is trained separately using python person2_ml_prediction.py or from the dashboard control. Its target is the next observed fill value, not a validated six- or twelve-hour forecast.
+The Streamlit route solver remains a demonstration that uses approximate coordinate costs; the backend route optimizer is the road-network implementation. Train the ML model from the repository root using `python person2_ml_prediction.py`. The web console can run inference only when the trained artifact is available; it does not train models. The model target is the next observed fill value, not a validated six- or twelve-hour forecast.
 
 ## Architecture
 
