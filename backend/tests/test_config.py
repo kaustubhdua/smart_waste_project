@@ -11,6 +11,7 @@ def production_settings(**overrides):
         "cors_origins": "https://ops.example.com,https://drivers.example.com",
         "auto_create_schema": False,
         "seed_demo_data": False,
+        "osrm_base_url": "https://routing.example.com",
     }
     values.update(overrides)
     return Settings(**values)
@@ -32,6 +33,8 @@ def test_production_configuration_accepts_explicit_safe_settings():
         {"cors_origins": "http://ops.example.com"},
         {"cors_origins": "http://localhost:8080"},
         {"cors_origins": ""},
+        {"osrm_base_url": "https://router.project-osrm.org"},
+        {"osrm_base_url": "http://routing.example.com"},
     ],
 )
 def test_production_configuration_rejects_unsafe_settings(override):
