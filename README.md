@@ -82,7 +82,7 @@ flowchart LR
    docker compose up --build
    ```
 
-5. Open the operator console at `http://localhost:8080`, API documentation at `http://localhost:8000/docs`, and health endpoints at `http://localhost:8000/health` and `/health/ready`.
+5. Open the operator console at `http://localhost:8080`. The web container proxies `/api/*`, `/health`, `/health/ready`, `/docs` and `/openapi.json` to the API on the private Compose network, so the browser uses the same origin by default. Direct API docs remain available at `http://localhost:8000/docs` for local development.
 6. Enter the configured `API_TOKEN` in the operator console. Local configuration can seed clearly labelled demo records; do not treat them as live sensor data.
 
 For real telemetry, enroll a device through `POST /api/v1/devices`, securely store the one-time `X-Device-Token`, and send readings to `POST /api/v1/telemetry` using its enrolled `device_id`, bound `bin_id`, unique `message_id`, calibrated `fill_percent`, and timezone-aware timestamp. Device credentials can be rotated or revoked.
