@@ -33,8 +33,14 @@ def validate_production_settings(config: Settings) -> None:
     errors: list[str] = []
     if config.database_url.strip().lower().startswith("sqlite"):
         errors.append("DATABASE_URL must use a durable production database")
-    if config.api_token.startswith(("change-me", "replace-with")) or len(config.api_token) < 32:
-        errors.append("API_TOKEN must be a unique secret of at least 32 characters")
+    token = config.api_token
+    if (
+        token.lower().startswith(("change-me", "replace-with"))
+        or len(token) < 32
+        or not token.strip()
+        or any(character.isspace() for character in token)
+    ):
+        errors.append("API_TOKEN must be a unique secret of at least 32 characters without whitespace or placeholder text")
     if config.auto_create_schema:
         errors.append("AUTO_CREATE_SCHEMA must be false; use Alembic migrations")
     if config.seed_demo_data:
@@ -65,7 +71,7 @@ def validate_production_settings(config: Settings) -> None:
                 or not parsed.hostname
                 or parsed.username is not None
                 or parsed.password is not None
-                or parsed.path not in ("", "/")
+                or parsed.path != ""
                 or parsed.params
                 or parsed.query
                 or parsed.fragment
