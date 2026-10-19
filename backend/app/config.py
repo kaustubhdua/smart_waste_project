@@ -40,6 +40,16 @@ def validate_production_settings(config: Settings) -> None:
     if config.seed_demo_data:
         errors.append("SEED_DEMO_DATA must be false in production")
 
+    routing_url = urlparse(config.osrm_base_url.strip())
+    if (
+        routing_url.scheme != "https"
+        or not routing_url.netloc
+        or routing_url.hostname in {"router.project-osrm.org", "routing.openstreetmap.de"}
+    ):
+        errors.append(
+            "OSRM_BASE_URL must be a trusted HTTPS routing provider; public demo routers are not production services"
+        )
+
     origins = [origin.strip() for origin in config.cors_origins.split(",") if origin.strip()]
     if not origins or "*" in origins:
         errors.append("CORS_ORIGINS must explicitly list trusted HTTPS origins")
