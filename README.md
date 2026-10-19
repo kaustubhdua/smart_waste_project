@@ -6,7 +6,7 @@
 
 A full-stack waste-operations engineering prototype combining IoT telemetry, collection workflows, vehicle-capacity-aware route planning, and a map-based operations console.
 
-[![Python CI](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/python-ci.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions)
+[![Python CI](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/ci.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions)
 [![Platform API](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/platform-api.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/platform-api.yml)
 [![Browser E2E](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/browser-e2e.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/browser-e2e.yml)
 [![CodeQL](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/codeql.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/codeql.yml)
