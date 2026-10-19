@@ -70,8 +70,10 @@ jobs:
         run: |
           docker compose up -d --wait --wait-timeout 180
           curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
+          curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
           curl --fail --silent --show-error http://127.0.0.1:8080/ > /dev/null
           curl --fail --silent --show-error http://127.0.0.1:8080/driver.html > /dev/null
+          curl --fail --silent --show-error -H "Authorization: Bearer ci-only-operator-token" http://127.0.0.1:8080/api/v1/operations/summary
           headers="$(curl --fail --silent --show-error -I http://127.0.0.1:8080/)"
           printf '%s' "$headers" | grep -qi '^X-Content-Type-Options: nosniff'
           printf '%s' "$headers" | grep -qi '^X-Frame-Options: DENY'
