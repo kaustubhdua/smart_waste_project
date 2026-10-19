@@ -1,118 +1,186 @@
-# Smart Waste Collection & Fleet Optimization
+<div align="center">
 
-<p align="center"><strong>Observe → forecast → prioritize → optimize → collect</strong></p>
+# ♻️ Smart Waste Collection & Fleet Optimization
 
-<p align="center">
-  <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
-  <img alt="FastAPI" src="https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white">
-  <img alt="Routing" src="https://img.shields.io/badge/Routing-OR--Tools-4285F4">
-  <img alt="Database" src="https://img.shields.io/badge/Database-PostgreSQL%20%2B%20PostGIS-4169E1?logo=postgresql&logoColor=white">
-  <img alt="Status" src="https://img.shields.io/badge/Status-Engineering%20prototype-orange">
-</p>
+**Observe → forecast → prioritize → optimize → collect**
 
-A waste-collection engineering project combining time-series feature engineering, fill-level prediction, collection-priority scoring, capacity-constrained vehicle routing, telemetry ingestion, persistent service history, and a map-based operator console.
+A full-stack waste-operations engineering prototype combining IoT telemetry, collection workflows, vehicle-capacity-aware route planning, and a map-based operations console.
 
-> **Honest status:** this is an engineering prototype, not a proven municipal deployment. Synthetic/demo records are not live sensor readings. Hardware calibration, identity-based role permissions, field evaluation, and production operations still require real-world validation.
+[![Python CI](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/python-ci.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions)
+[![Platform API](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/platform-api.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/platform-api.yml)
+[![Browser E2E](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/browser-e2e.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/browser-e2e.yml)
+[![CodeQL](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/codeql.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/codeql.yml)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi)
+![Database](https://img.shields.io/badge/PostgreSQL-PostGIS-4169E1?logo=postgresql&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Engineering%20prototype-orange)
 
-## Two ways to run it
+</div>
 
-### 1. Full-stack API + operator console
+> **Honest status:** This is a portfolio/engineering prototype, not a proven municipal deployment. Demo records are synthetic, and no physical sensor calibration, production restore drill, live field pilot, or operational-savings claim has been validated. Review the [release checklist](docs/RELEASE_CHECKLIST.md) before treating it as production software.
 
-The platform foundation lives in the backend and web directories. It includes FastAPI, PostgreSQL/PostGIS, telemetry persistence, job lifecycle events, OSRM road-network costs, OR-Tools route optimization, Alembic schema migrations, and an API-connected operator console.
+## Contents
 
-1. Copy .env.example to .env.
-2. Replace both placeholder secrets with unique random values.
-3. Start the services (the local template enables clearly labeled demo records):
+- [Highlights](#highlights)
+- [Architecture](#architecture)
+- [Run locally](#run-locally)
+- [How the workflow fits together](#how-the-workflow-fits-together)
+- [API overview](#api-overview)
+- [Testing](#testing)
+- [Security and deployment](#security-and-deployment)
+- [Known limitations](#known-limitations)
+- [Repository map](#repository-map)
 
-    docker compose up --build
+## Highlights
 
-4. Open the operator console at http://localhost:8080, API docs at http://localhost:8000/docs, and health check at http://localhost:8000/health. Set SEED_DEMO_DATA=false in production; demo records are labeled and are not real sensor readings.
-
-Enter the configured API_TOKEN in the operator console. Enroll each device through POST /api/v1/devices. Store the returned X-Device-Token securely; only its hash is persisted. Send readings to POST /api/v1/telemetry with the enrolled device_id, its bound bin_id, a unique message_id, calibrated fill_percent, and a timezone-aware ISO timestamp. Device credentials can be rotated or revoked. The UI does not invent missing telemetry.
-
-Route optimization uses the OSRM road-distance matrix and OR-Tools capacity constraints. The public OSRM endpoint is only suitable for development; use a contracted or self-hosted routing provider for a deployed service.
-
-### 2. Legacy Streamlit / ML demonstration
-
-Install the pinned root requirements and launch:
-
-    python -m venv .venv
-    # Activate the environment
-    pip install -r requirements.txt
-    streamlit run app.py
-
-The Streamlit route solver remains a demonstration that uses approximate coordinate costs; the backend route optimizer is the road-network implementation. Train the ML model from the repository root using `python person2_ml_prediction.py`. The web console can run inference only when the trained artifact is available; it does not train models. The model target is the next observed fill value, not a validated six- or twelve-hour forecast.
+- **Telemetry ingestion:** per-device credentials, bin-scoped access, timestamp/freshness validation, duplicate-message idempotency, and stored reading history.
+- **Collection lifecycle:** persistent jobs and service events, approval and assignment, start/complete/exception transitions, and completed-job verification.
+- **Route optimization:** OSRM road-distance matrices and route geometry combined with OR-Tools capacity-constrained vehicle routing.
+- **Transactional dispatch:** approved jobs are optimized against registered vehicles and assigned with route-plan history and service events.
+- **Operator console:** responsive map-based bin monitoring, telemetry summary, vehicle/job controls, route preview/dispatch, and optional model forecasts.
+- **Driver workflow:** vehicle-scoped assigned stops, collection status changes, exception reporting, and external navigation handoff.
+- **ML demonstration:** feature engineering, Random Forest inference, chronological holdout evaluation and simple baselines. Forecast scope is deliberately limited to the next observed fill value.
+- **Engineering quality:** SQLAlchemy persistence, Alembic migrations, Docker Compose, API readiness checks, Python CI, CodeQL, and browser-driven operator/driver smoke tests.
 
 ## Architecture
 
-    Operator console (web/) ──┐
-                              ├── FastAPI ── PostgreSQL / PostGIS
-    IoT device ── HTTPS API ──┘       │
-                                      ├── Telemetry and service history
-                                      ├── OSRM road matrix / route geometry
-                                      └── OR-Tools CVRP optimizer
+```mermaid
+flowchart LR
+    Operator[Operator console] --> API[FastAPI]
+    Driver[Driver web view] --> API
+    Device[IoT device] -->|Device token + telemetry| API
+    API --> DB[(PostgreSQL / PostGIS)]
+    API --> Jobs[Jobs and service events]
+    API --> Routing[OSRM road matrix]
+    Routing --> Optimizer[OR-Tools CVRP optimizer]
+    Jobs --> Optimizer
+    Optimizer --> Plans[Persisted route plans]
+    Data[CSV / synthetic data] --> Features[Feature engineering]
+    Features --> Model[Random Forest demo]
+    Model --> Forecasts[Optional inference endpoint]
+```
 
-    CSV / synthetic demonstration data ── feature engineering ── Random Forest
-                                                               └── MAE/RMSE baselines
+## Run locally
 
-## Main capabilities
+### Full-stack API + web console (recommended)
 
-- **Telemetry:** validated live readings with per-device credentials, scoped access, freshness checks and duplicate-message idempotency.
-- **Data integrity:** persistent bins, collection jobs, service events, route plans, and schema migration.
-- **Prediction:** trained model artifact, inference helper, chronological holdout, mean baseline and last-observation baseline.
-- **Priority:** deterministic bounded weighted heuristic. It is not mislabeled as a true fuzzy-inference engine.
-- **Routing:** OSRM road-distance matrix, OR-Tools CVRP capacity constraints, route geometry and persisted route-plan history.
-- **Operator UI:** responsive bin register/list, telemetry summary, map and route optimization controls.
-- **CI:** legacy Python tests and backend API/optimizer tests.
+**Prerequisites:** Docker with the Compose plugin.
 
-## Tests
+1. Clone the repository and enter its directory.
+2. Create local environment settings from the template:
 
-    # Existing Python core
-    pip install -r requirements.txt
-    python -m unittest discover -s tests -v
+   ```bash
+   cp .env.example .env
+   ```
 
-    # API and routing optimizer
-    cd backend
-    pip install -r requirements.txt
-    PYTHONPATH=. API_TOKEN=test-operator-token pytest -q
+3. Replace the placeholder database and API secrets with unique local values. Keep `.env` out of Git.
+4. Start the stack:
+
+   ```bash
+   docker compose up --build
+   ```
+
+5. Open the operator console at `http://localhost:8080`, API documentation at `http://localhost:8000/docs`, and health endpoints at `http://localhost:8000/health` and `/health/ready`.
+6. Enter the configured `API_TOKEN` in the operator console. Local configuration can seed clearly labelled demo records; do not treat them as live sensor data.
+
+For real telemetry, enroll a device through `POST /api/v1/devices`, securely store the one-time `X-Device-Token`, and send readings to `POST /api/v1/telemetry` using its enrolled `device_id`, bound `bin_id`, unique `message_id`, calibrated `fill_percent`, and timezone-aware timestamp. Device credentials can be rotated or revoked.
+
+### Legacy Streamlit / ML demonstration
+
+```bash
+python -m venv .venv
+# Activate the virtual environment
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Train the optional model artifact from the repository root with `python person2_ml_prediction.py`. The API loads an existing artifact for inference; it does not train the model during requests. The legacy Streamlit route solver uses approximate coordinate costs, while the backend optimizer uses road-network costs.
+
+## How the workflow fits together
+
+1. **Observe:** devices submit validated telemetry; duplicate messages are handled idempotently and stale readings are surfaced.
+2. **Prioritize:** the platform scores collection candidates using a bounded, documented heuristic and recorded service history.
+3. **Prepare:** operators review jobs and register vehicle capacity/depot details.
+4. **Optimize:** approved jobs are routed using road-distance costs and vehicle capacity constraints.
+5. **Dispatch:** the API persists the route plan and assigns stops transactionally.
+6. **Collect:** drivers start, complete, or report an exception for their assigned stops.
+7. **Verify:** operators review completed jobs and service history; completed work releases vehicles for subsequent dispatch.
 
 ## API overview
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| POST | /api/v1/bins | Register a bin |
-| GET | /api/v1/bins | List active bins |
-| POST | /api/v1/devices | Enroll a device and issue its one-time token |
-| GET | /api/v1/devices | List device status without revealing tokens |
-| POST | /api/v1/devices/{device_id}/rotate-token | Rotate a device credential |
-| POST | /api/v1/drivers | Enroll a driver and issue a one-time token |
-| GET | /api/v1/driver/jobs | List stops for the authenticated driver vehicle |
-| POST | /api/v1/driver/jobs/{job_id}/transition | Start, complete or report an assigned stop exception |
-| DELETE | /api/v1/devices/{device_id} | Revoke a device credential |
-| POST | /api/v1/telemetry | Ingest a live device reading |
-| POST | /api/v1/telemetry/import-csv | Import validated historical telemetry CSV (2 MB / 10,000 row limit) |
-| GET | /api/v1/bins/{bin_id}/history | Inspect stored readings |
-| GET | /api/v1/operations/summary | Inspect freshness and job-state counts |
-| GET | /api/v1/forecasts | Predict next-observation fill for bins with suitable recent history and a trained artifact |
-| GET | /api/v1/jobs | List collection jobs, optionally filtered by status |
-| GET | /api/v1/jobs/{job_id}/events | Inspect service history |
-| POST | /api/v1/vehicles | Register a collection vehicle |
-| POST | /api/v1/jobs/{job_id}/assign | Assign a job to a capacity-checked vehicle |
-| POST | /api/v1/jobs | Create a collection candidate |
-| POST | /api/v1/jobs/{job_id}/transitions | Record a validated lifecycle transition |
-| POST | /api/v1/routes/optimize | Preview an optimized route plan |
-| POST | /api/v1/routes/dispatch | Optimize approved jobs against registered vehicles and assign stops transactionally |
-| GET | /api/v1/routes/plans | List persisted route plans |
-| GET | /health/ready | Check database readiness |
-| GET | /api/v1/routes/plans/{plan_id} | Retrieve a route plan |
+| `POST` | `/api/v1/bins` | Register a bin |
+| `GET` | `/api/v1/bins` | List active bins |
+| `POST` | `/api/v1/devices` | Enroll a device and issue its one-time token |
+| `GET` | `/api/v1/devices` | List device status without revealing tokens |
+| `POST` | `/api/v1/devices/{device_id}/rotate-token` | Rotate a device credential |
+| `DELETE` | `/api/v1/devices/{device_id}` | Revoke a device credential |
+| `POST` | `/api/v1/telemetry` | Ingest a device reading |
+| `POST` | `/api/v1/telemetry/import-csv` | Import validated historical telemetry (2 MB / 10,000 row limit) |
+| `GET` | `/api/v1/bins/{bin_id}/history` | Inspect stored readings |
+| `GET` | `/api/v1/operations/summary` | Inspect freshness and job-state counts |
+| `GET` | `/api/v1/forecasts` | Predict next-observation fill when history and model artifact are suitable |
+| `POST` | `/api/v1/vehicles` | Register a collection vehicle |
+| `POST` | `/api/v1/jobs` | Create a collection candidate |
+| `GET` | `/api/v1/jobs` | List collection jobs, optionally filtered by status |
+| `POST` | `/api/v1/jobs/{job_id}/assign` | Assign a job to a capacity-checked vehicle |
+| `POST` | `/api/v1/jobs/{job_id}/transitions` | Record a validated lifecycle transition |
+| `GET` | `/api/v1/jobs/{job_id}/events` | Inspect service history |
+| `POST` | `/api/v1/routes/optimize` | Preview an optimized route plan |
+| `POST` | `/api/v1/routes/dispatch` | Optimize approved jobs and assign stops transactionally |
+| `GET` | `/api/v1/routes/plans` | List persisted route plans |
+| `GET` | `/api/v1/routes/plans/{plan_id}` | Retrieve a route plan |
+| `GET` | `/api/v1/driver/jobs` | List stops for an authenticated driver's vehicle |
+| `POST` | `/api/v1/driver/jobs/{job_id}/transition` | Start, complete, or report a stop exception |
+| `GET` | `/health/ready` | Check database readiness |
 
-## Limitations and next production gates
+## Testing
 
-- Shared bearer tokens are a development authentication mechanism, not multi-user login or role-based authorization.
-- The public OSRM endpoint has usage limits and no production service guarantee.
-- Dispatch is available for approved jobs and registered vehicles; named drivers have vehicle-scoped credentials and an online mobile workflow. Offline actions and turn-by-turn navigation are not implemented.
-- Train the optional model artifact from the repository root with `python person2_ml_prediction.py`; it is written to `models/waste_model.pkl`, which Docker mounts read-only into the API. The API serves predictions when temperature measurements and enough recent history are present. The current model predicts the next observed value, not a calibrated 6/12-hour forecast; model-driven demand is opt-in and should remain disabled until validated against field data.
+Run the legacy Python tests:
+
+```bash
+pip install -r requirements.txt
+python -m unittest discover -s tests -v
+```
+
+Run the backend/API tests:
+
+```bash
+cd backend
+pip install -r requirements.txt
+PYTHONPATH=. API_TOKEN=test-operator-token pytest -q
+```
+
+Browser tests run in GitHub Actions using Playwright Chromium. They mock API responses to verify key UI behaviors; they do not prove the production deployment works. The Platform API workflow also validates migrations, builds the Compose services, checks readiness, and smoke-tests the running stack.
+
+## Security and deployment
+
+- Production startup rejects SQLite, weak/placeholder API tokens, automatic schema creation, demo seeding, unsafe CORS settings, and the public demo OSRM router.
+- Nginx adds browser security headers and a Content Security Policy. The current inline scripts/styles mean CSP still permits `unsafe-inline`; this is a known hardening opportunity.
+- The operator API currently uses a shared bearer token. This is not multi-user identity or role-based authorization.
+- Use a contracted or self-hosted routing service for deployment. The public OSRM demo service is for development only.
+- Before public exposure, configure managed secrets, HTTPS/TLS, private database networking, rate limits, logs/alerts, automated encrypted backups and a tested restore procedure.
+- Follow the [production operations runbook](docs/PRODUCTION_RUNBOOK.md) and [release acceptance checklist](docs/RELEASE_CHECKLIST.md). Do not mark unchecked acceptance gates complete without evidence.
+
+## Known limitations
+
+- The current operator authentication is a shared token; identity-based roles, per-user revocation and a complete audit trail remain to be implemented.
 - No physical sensor, calibration process, municipal pilot, or real operational savings claim has been validated.
-- Use production-grade secret management, TLS, backups, monitoring, threat modeling, and a reviewed migration process before exposing the service publicly.
+- The optional ML artifact predicts the next observed fill value rather than a calibrated 6/12-hour forecast. Keep model-assisted dispatch disabled until field evaluation supports it.
+- Offline driver actions and turn-by-turn navigation are not implemented.
+- Production hosting, restore drills, load/soak tests, monitoring ownership and field evaluation are environment-dependent and not claimed as complete.
 
-See [implementation status](docs/IMPLEMENTATION_STATUS.md) and README_PLATFORM.md for details.
+## Repository map
+
+| Path | What lives here |
+|---|---|
+| `backend/app/` | FastAPI routes, data models, configuration, routing and optimization |
+| `backend/alembic/` | Database schema migrations |
+| `web/` | Operator console, driver view and Nginx configuration |
+| `tests/` | Core tests and Playwright browser E2E tests |
+| `.github/workflows/` | CI, CodeQL and browser test workflows |
+| `docs/` | Implementation status, release checklist and production runbook |
+| `models/` | Optional local ML model artifact (generated; not required for core API use) |
+
+Further detail: [implementation status](docs/IMPLEMENTATION_STATUS.md) and [platform notes](README_PLATFORM.md).
