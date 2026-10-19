@@ -1,6 +1,6 @@
 # Implementation status and honest limitations
 
-## Implemented in this branch
+## Implemented capabilities
 - FastAPI API with shared operator bearer token and individually enrolled device/driver tokens; device and driver tokens are stored as SHA-256 hashes, can be rotated/revoked, and are scoped to a bin or vehicle.
 - PostgreSQL/PostGIS Docker Compose environment, SQLAlchemy persistence, Alembic migrations and database readiness check.
 - Bin registry, vehicle registry, telemetry history, collection jobs, service events, route plans and operations summary.
