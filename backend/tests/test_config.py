@@ -40,10 +40,14 @@ def test_production_configuration_accepts_explicit_safe_settings():
         {"cors_origins": "https://ops.example.com?next=drivers"},
         {"cors_origins": "https://user:pass@ops.example.com"},
         {"cors_origins": "https://ops.example.com#fragment"},
+        {"cors_origins": "https://ops.example.com:notaport"},
+        {"cors_origins": "https://ops .example.com"},
         {"osrm_base_url": "https://router.project-osrm.org"},
         {"osrm_base_url": "http://routing.example.com"},
         {"osrm_base_url": "https://user:pass@routing.example.com"},
         {"osrm_base_url": "https://routing.example.com?token=secret"},
+        {"osrm_base_url": "https://routing.example.com:notaport"},
+        {"osrm_base_url": "https://routing .example.com"},
     ],
 )
 def test_production_configuration_rejects_unsafe_settings(override):
