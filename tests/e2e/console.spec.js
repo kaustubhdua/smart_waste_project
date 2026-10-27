@@ -67,10 +67,10 @@ test("driver can start and complete an assigned stop", async ({ page }) => {
 
 test("bin registration requires explicit measured data and provenance", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByLabel("Latitude")).toHaveValue("");
-  await expect(page.getByLabel("Longitude")).toHaveValue("");
-  await expect(page.getByLabel("Capacity (liters)").first()).toHaveValue("");
-  await expect(page.getByLabel("Data source")).toHaveValue("");
-  await expect(page.getByLabel("Criticality")).toHaveValue("");
-  await expect(page.getByLabel("Data source")).toHaveAttribute("required", "");
+  await expect(page.locator("#lat")).toHaveValue("");
+  await expect(page.locator("#lon")).toHaveValue("");
+  await expect(page.locator("#capacity")).toHaveValue("");
+  await expect(page.locator("#source")).toHaveValue("");
+  await expect(page.locator("#criticality")).toHaveValue("");
+  await expect(page.locator("#source")).toHaveAttribute("required", "");
 });
