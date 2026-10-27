@@ -451,3 +451,10 @@ def test_bin_source_must_be_explicit_to_preserve_data_provenance():
     payload = {"id": "bin-no-source", "latitude": 28.6, "longitude": 77.2, "capacity_liters": 1000}
     response = client.post("/api/v1/bins", json=payload, headers=OP)
     assert response.status_code == 422
+
+
+
+def test_bin_criticality_must_be_explicit():
+    payload = {"id": "bin-no-criticality", "latitude": 28.6, "longitude": 77.2, "capacity_liters": 1000, "source": "live"}
+    response = client.post("/api/v1/bins", json=payload, headers=OP)
+    assert response.status_code == 422
