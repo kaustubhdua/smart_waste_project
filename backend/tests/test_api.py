@@ -448,7 +448,7 @@ def test_placeholder_operator_token_rejected_case_insensitively(monkeypatch):
 
 
 def test_bin_source_must_be_explicit_to_preserve_data_provenance():
-    payload = {"id": "bin-no-source", "latitude": 28.6, "longitude": 77.2, "capacity_liters": 1000}
+    payload = {"id": "bin-no-source", "latitude": 28.6, "longitude": 77.2, "capacity_liters": 1000, "criticality": 3}
     response = client.post("/api/v1/bins", json=payload, headers=OP)
     assert response.status_code == 422
 
