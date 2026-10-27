@@ -109,8 +109,10 @@ def _release_vehicle_if_idle(db: Session, vehicle_id: str | None):
         vehicle.available = True
 
 def require_operator(authorization: str | None = Header(default=None)):
-    expected = "Bearer " + settings.api_token
-    if not authorization or not compare_digest(authorization, expected) or settings.api_token.startswith(("change-me", "replace-with")):
+    token = settings.api_token
+    expected = "Bearer " + token
+    placeholder = token.strip() != token or not token.strip() or any(character.isspace() for character in token) or token.lower().startswith(("change-me", "replace-with"))
+    if not authorization or placeholder or not compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail="Valid configured operator bearer token required")
 
 @app.get("/health")
