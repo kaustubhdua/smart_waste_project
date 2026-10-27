@@ -85,7 +85,7 @@ The default stack starts with an empty database: it does not generate synthetic 
    ```
 
 5. Open the operator console at `http://localhost:8080`, API documentation at `http://localhost:8000/docs`, and health endpoints at `http://localhost:8000/health` and `/health/ready`.
-6. Enter the configured `API_TOKEN` in the operator console. Local configuration can seed clearly labelled demo records; do not treat them as live sensor data.
+6. Enter the configured `API_TOKEN` in the operator console. The default configuration starts empty. To intentionally seed synthetic demonstration records, set `SEED_DEMO_DATA=true` in `.env` and restart; never treat those records as live sensor data.
 
 For real telemetry, enroll a device through `POST /api/v1/devices`, securely store the one-time `X-Device-Token`, and send readings to `POST /api/v1/telemetry` using its enrolled `device_id`, bound `bin_id`, unique `message_id`, calibrated `fill_percent`, and timezone-aware timestamp. Device credentials can be rotated or revoked.
 
