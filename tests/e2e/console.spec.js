@@ -247,6 +247,15 @@ test("operator bin form does not submit without required source and measured fie
 
 test("operator can import historical telemetry with multipart form data and honest provenance", async ({ page }) => {
   let uploadRequest;
+  await page.route("https://api.test/api/v1/bins", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("https://api.test/api/v1/jobs**", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("https://api.test/api/v1/vehicles", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
   await page.route("https://api.test/api/v1/telemetry/import-csv", async route => {
     uploadRequest = route.request();
     await route.fulfill({
