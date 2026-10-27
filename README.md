@@ -64,6 +64,8 @@ flowchart LR
 
 ## Run locally
 
+The default stack starts with an empty database: it does not generate synthetic bins, telemetry or vehicles. Records shown in the console come from the configured API/database. To intentionally load labeled demonstration data for a walkthrough, set `SEED_DEMO_DATA=true` in `.env` and restart the stack. Never use demo records as evidence of real sensor activity or operational performance.
+
 ### Full-stack API + web console (recommended)
 
 **Prerequisites:** Docker with the Compose plugin.
