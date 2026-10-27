@@ -188,8 +188,8 @@ test("operator can register a bin through the API contract with explicit provena
 
   await page.getByLabel("Bin ID").fill(created.id);
   await page.locator("#capacity").fill(String(created.capacity_liters));
-  await page.getByLabel("Latitude").fill(String(created.latitude));
-  await page.getByLabel("Longitude").fill(String(created.longitude));
+  await page.locator("#lat").fill(String(created.latitude));
+  await page.locator("#lon").fill(String(created.longitude));
   await page.getByLabel("Criticality").selectOption(String(created.criticality));
   await page.getByLabel("Data source").selectOption(created.source);
   await page.getByRole("button", { name: "Create bin record" }).click();
