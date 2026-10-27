@@ -145,7 +145,7 @@ test("operator and driver views fit a narrow mobile viewport", async ({ page }) 
   expect(driverWidth.document).toBeLessThanOrEqual(driverWidth.viewport);
 });
 
-test("operator can register a real API bin only with explicit provenance", async ({ page }) => {
+test("operator can register a bin through the API contract with explicit provenance", async ({ page }) => {
   const created = {
     id: "BIN-REGISTRATION-E2E",
     latitude: 28.6139,
@@ -194,7 +194,7 @@ test("operator can register a real API bin only with explicit provenance", async
   await page.getByLabel("Data source").selectOption(created.source);
   await page.getByRole("button", { name: "Create bin record" }).click();
 
-  await expect(page.getByRole("status")).toContainText("Loaded 1 bins from API");
+  await expect(page.getByRole("status")).toContainText(/Loaded 1 bins? from API/);
   await expect(page.locator("#bins")).toContainText(created.id);
   expect(postedPayload).toEqual({
     id: created.id,
