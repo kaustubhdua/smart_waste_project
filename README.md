@@ -164,7 +164,7 @@ Browser tests run in GitHub Actions using Playwright Chromium. They mock API res
 The web container reverse-proxies `/api/*` and health/API documentation routes to the API over the private Compose network. Both browser views default to same-origin API access, so a hosted HTTPS deployment does not accidentally call `localhost` on each visitor's device. For an external API origin, configure it explicitly in the UI and set the API's trusted CORS origins accordingly.
 
 - Production startup rejects SQLite, weak/placeholder API tokens, automatic schema creation, demo seeding, unsafe CORS settings, and the public demo OSRM router.
-- Nginx adds browser security headers and a Content Security Policy. The current inline scripts/styles mean CSP still permits `unsafe-inline`; this is a known hardening opportunity.
+- Nginx adds browser security headers and a Content Security Policy. Operator and driver JavaScript is served from same-origin files, so `script-src` does not allow `unsafe-inline`. Inline styles still require `unsafe-inline` and remain a hardening opportunity.
 - The operator API currently uses a shared bearer token. This is not multi-user identity or role-based authorization.
 - Use a contracted or self-hosted routing service for deployment. The public OSRM demo service is for development only.
 - Before public exposure, configure managed secrets, HTTPS/TLS, private database networking, rate limits, logs/alerts, automated encrypted backups and a tested restore procedure.
