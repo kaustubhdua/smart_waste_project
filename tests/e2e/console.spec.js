@@ -74,3 +74,14 @@ test("bin registration requires explicit measured data and provenance", async ({
   await expect(page.locator("#criticality")).toHaveValue("");
   await expect(page.locator("#source")).toHaveAttribute("required", "");
 });
+
+
+test("operator console labels data provenance and avoids implying live telemetry", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("API records · source-labelled")).toBeVisible();
+  await expect(page.getByText("Live API data")).toHaveCount(0);
+  for (const id of ["capacity", "lat", "lon", "criticality", "source", "vehicleCap", "vehicleLat", "vehicleLon", "depotLat", "depotLon", "vehicleCapacity", "vehicleCount"]) {
+    await expect(page.locator("#" + id)).toHaveValue("");
+  }
+  await expect(page.getByText(/the console does not invent telemetry/i)).toBeVisible();
+});
