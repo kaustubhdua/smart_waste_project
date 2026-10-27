@@ -11,10 +11,33 @@ test("operator console renders controls and reports invalid API token", async ({
   await page.route("**/api/v1/bins", async route => {
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Not authenticated" }) });
   });
-  await page.getByLabel("API base URL").fill("http://api.test");
+  await page.getByLabel("API base URL").fill("https://api.test");
   await page.getByLabel("Operator bearer token").fill("invalid-token");
   await page.getByRole("button", { name: "Connect & load bins" }).click();
   await expect(page.getByRole("status")).toContainText(/not authenticated/i);
+});
+
+test("operator console rejects insecure remote API hosts before sending credentials", async ({ page }) => {
+  let requestSent = false;
+  page.on("request", request => { if (request.url().startsWith("http://api.test/")) requestSent = true; });
+  await page.goto("/");
+  await page.getByLabel("API base URL").fill("http://api.test");
+  await page.getByLabel("Operator bearer token").fill("must-not-leave-browser");
+  await page.getByRole("button", { name: "Connect & load bins" }).click();
+  await expect(page.getByRole("status")).toContainText(/remote API hosts must use HTTPS/i);
+  expect(requestSent).toBe(false);
+});
+
+test("driver view rejects insecure remote API hosts before sending credentials", async ({ page }) => {
+  let requestSent = false;
+  page.on("request", request => { if (request.url().startsWith("http://api.test/")) requestSent = true; });
+  await page.goto("/driver.html");
+  await page.getByLabel("API base URL").fill("http://api.test");
+  await page.getByLabel("Driver ID").fill("DRIVER-E2E");
+  await page.getByLabel("Driver token").fill("must-not-leave-browser");
+  await page.getByRole("button", { name: "Load assigned stops" }).click();
+  await expect(page.getByRole("status")).toContainText(/remote API hosts must use HTTPS/i);
+  expect(requestSent).toBe(false);
 });
 
 test("driver view reports authentication failure and does not invent jobs", async ({ page }) => {
@@ -25,7 +48,7 @@ test("driver view reports authentication failure and does not invent jobs", asyn
   await expect(page).toHaveTitle(/WasteOps \| Driver/);
   await expect(page.getByRole("heading", { name: "Driver sign-in" })).toBeVisible();
   await expect(page.getByRole("note")).toContainText(/driver credentials are sent to this host/i);
-  await page.getByLabel("API base URL").fill("http://api.test");
+  await page.getByLabel("API base URL").fill("https://api.test");
   await page.getByLabel("Driver ID").fill("DRIVER-E2E");
   await page.getByLabel("Driver token").fill("invalid-token");
   await page.getByRole("button", { name: "Load assigned stops" }).click();
@@ -53,7 +76,7 @@ test("driver can start and complete an assigned stop", async ({ page }) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "job-e2e-0001", status }) });
   });
   await page.goto("/driver.html");
-  await page.getByLabel("API base URL").fill("http://api.test");
+  await page.getByLabel("API base URL").fill("https://api.test");
   await page.getByLabel("Driver ID").fill("DRIVER-E2E");
   await page.getByLabel("Driver token").fill("test-only-token");
   await page.getByRole("button", { name: "Load assigned stops" }).click();
