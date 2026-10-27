@@ -80,6 +80,14 @@ jobs:
           printf '%s' "$headers" | grep -qi '^X-Frame-Options: DENY'
           printf '%s' "$headers" | grep -qi '^Referrer-Policy: strict-origin-when-cross-origin'
           printf '%s' "$headers" | grep -qi '^Content-Security-Policy:'
+          # API responses contain operational data and may include one-time credentials.
+          # Assert no-store and that security headers remain present on proxied API routes.
+          api_headers="$(curl --fail --silent --show-error -D - -o /dev/null -H "Authorization: Bearer ci-only-operator-token" http://127.0.0.1:8080/api/v1/operations/summary)"
+          printf '%s' "$api_headers" | grep -qi '^Cache-Control: no-store, private'
+          printf '%s' "$api_headers" | grep -qi '^Pragma: no-cache'
+          printf '%s' "$api_headers" | grep -qi '^X-Content-Type-Options: nosniff'
+          printf '%s' "$api_headers" | grep -qi '^X-Frame-Options: DENY'
+          printf '%s' "$api_headers" | grep -qi '^Content-Security-Policy:'
           curl --fail --silent --show-error -H "Authorization: Bearer ci-only-operator-token" http://127.0.0.1:8000/api/v1/operations/summary
       - name: Tear down Compose stack
         if: always()
