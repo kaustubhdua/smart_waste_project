@@ -100,15 +100,8 @@ jobs:
       - name: Validate operator and driver browser JavaScript syntax
         working-directory: ${{ github.workspace }}
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          for name in ("index", "driver"):
-              html = Path(f"web/{name}.html").read_text()
-              scripts = [script for script in re.findall(r"<script>(.*?)</script>", html, re.S) if script.strip()]
-              assert scripts, f"No inline JavaScript found in web/{name}.html"
-              Path(f"/tmp/{name}.js").write_text("\n".join(scripts))
-          PY
-          node --check /tmp/index.js
-          node --check /tmp/driver.js
+          test -s web/operator.js
+          test -s web/driver.js
+          ! grep -Eq '<script[[:space:]]*>' web/index.html web/driver.html
+          node --check web/operator.js
+          node --check web/driver.js

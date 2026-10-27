@@ -4,3 +4,5 @@ COPY index.html /usr/share/nginx/html/index.html
 COPY driver.html /usr/share/nginx/html/driver.html
 EXPOSE 80
 COPY security-headers.conf /etc/nginx/security-headers.conf
+COPY operator.js /usr/share/nginx/html/operator.js
+COPY driver.js /usr/share/nginx/html/driver.js
