@@ -261,7 +261,7 @@ test("operator can import historical telemetry with multipart form data and hone
   await page.locator("#telemetryCsv").setInputFiles({
     name: "readings.csv",
     mimeType: "text/csv",
-    buffer: Buffer.from("bin_id,device_id,message_id,fill_percent,measured_at\\nBIN-001,SENSOR-001,msg-1,42,2026-10-27T10:00:00Z\\n"),
+    buffer: Buffer.from("bin_id,device_id,message_id,fill_percent,measured_at\nBIN-001,SENSOR-001,msg-1,42,2026-10-27T10:00:00Z\n"),
   });
   await page.getByRole("button", { name: "Import historical telemetry" }).click();
   await expect(page.locator("#telemetryImportResult")).toContainText("Accepted: 2 new readings");
@@ -269,6 +269,6 @@ test("operator can import historical telemetry with multipart form data and hone
   await expect(page.locator("#status")).toContainText(/source is labelled imported/i);
   expect(uploadRequest).toBeTruthy();
   expect(uploadRequest.method()).toBe("POST");
-  expect(uploadRequest.headers()["content-type"]).toMatch(/^multipart\\/form-data; boundary=/i);
+  expect(uploadRequest.headers()["content-type"]).toMatch(/^multipart\/form-data; boundary=/i);
   expect(uploadRequest.headers()["authorization"]).toBe("Bearer test-only-token");
 });
