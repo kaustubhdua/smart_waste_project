@@ -436,3 +436,12 @@ def test_dispatch_rolls_back_assignments_when_route_geometry_fails(monkeypatch):
     events = client.get(f"/api/v1/jobs/{job_id}/events", headers=OP).json()
     assert [event["new_status"] for event in events] == ["detected", "approved"]
     assert client.get("/api/v1/routes/plans", headers=OP).json() == []
+
+
+def test_placeholder_operator_token_rejected_case_insensitively(monkeypatch):
+    from app.main import settings
+
+    placeholder = "REPLACE-WITH-A-LONG-RANDOM-OPERATOR-TOKEN"
+    monkeypatch.setattr(settings, "api_token", placeholder)
+    response = client.get("/api/v1/bins", headers={"Authorization": "Bearer " + placeholder})
+    assert response.status_code == 401
