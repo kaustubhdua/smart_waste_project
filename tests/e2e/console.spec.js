@@ -187,7 +187,7 @@ test("operator can register a bin through the API contract with explicit provena
   await expect(page.getByText(/No bins registered yet/)).toBeVisible();
 
   await page.getByLabel("Bin ID").fill(created.id);
-  await page.getByLabel("Capacity (liters)").fill(String(created.capacity_liters));
+  await page.locator("#capacity").fill(String(created.capacity_liters));
   await page.getByLabel("Latitude").fill(String(created.latitude));
   await page.getByLabel("Longitude").fill(String(created.longitude));
   await page.getByLabel("Criticality").selectOption(String(created.criticality));
