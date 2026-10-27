@@ -244,3 +244,31 @@ test("operator bin form does not submit without required source and measured fie
   await expect(page.locator("#source")).toHaveValue("");
   await expect(page.locator("#status")).toContainText(/Enter your locally configured operator token/);
 });
+
+test("operator can import historical telemetry with multipart form data and honest provenance", async ({ page }) => {
+  let uploadRequest;
+  await page.route("https://api.test/api/v1/telemetry/import-csv", async route => {
+    uploadRequest = route.request();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ accepted: 2, duplicates_skipped: 1, source: "imported" }),
+    });
+  });
+  await page.goto("/");
+  await page.getByLabel("API base URL").fill("https://api.test");
+  await page.getByLabel("Operator bearer token").fill("test-only-token");
+  await page.locator("#telemetryCsv").setInputFiles({
+    name: "readings.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("bin_id,device_id,message_id,fill_percent,measured_at\\nBIN-001,SENSOR-001,msg-1,42,2026-10-27T10:00:00Z\\n"),
+  });
+  await page.getByRole("button", { name: "Import historical telemetry" }).click();
+  await expect(page.locator("#telemetryImportResult")).toContainText("Accepted: 2 new readings");
+  await expect(page.locator("#telemetryImportResult")).toContainText("Duplicates skipped: 1");
+  await expect(page.locator("#status")).toContainText(/source is labelled imported/i);
+  expect(uploadRequest).toBeTruthy();
+  expect(uploadRequest.method()).toBe("POST");
+  expect(uploadRequest.headers()["content-type"]).toMatch(/^multipart\\/form-data; boundary=/i);
+  expect(uploadRequest.headers()["authorization"]).toBe("Bearer test-only-token");
+});
