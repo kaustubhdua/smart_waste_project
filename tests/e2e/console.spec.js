@@ -144,3 +144,78 @@ test("operator and driver views fit a narrow mobile viewport", async ({ page }) 
   }));
   expect(driverWidth.document).toBeLessThanOrEqual(driverWidth.viewport);
 });
+
+test("operator can register a bin through the API contract with explicit provenance", async ({ page }) => {
+  const created = {
+    id: "BIN-REGISTRATION-E2E",
+    latitude: 28.6139,
+    longitude: 77.209,
+    capacity_liters: 1100,
+    criticality: 3,
+    source: "live",
+    active: true,
+  };
+  let persisted = false;
+  let postedPayload;
+
+  await page.route("**/api/v1/bins", async route => {
+    if (route.request().method() === "POST") {
+      postedPayload = route.request().postDataJSON();
+      persisted = true;
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(created) });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(persisted ? [created] : []),
+    });
+  });
+  await page.route("**/api/v1/bins/**/history*", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/jobs**", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/vehicles", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Operator bearer token").fill("test-only-token");
+  await page.getByRole("button", { name: "Connect & load bins" }).click();
+  await expect(page.getByText(/No bins registered yet/)).toBeVisible();
+
+  await page.getByLabel("Bin ID").fill(created.id);
+  await page.locator("#capacity").fill(String(created.capacity_liters));
+  await page.locator("#lat").fill(String(created.latitude));
+  await page.locator("#lon").fill(String(created.longitude));
+  await page.getByLabel("Criticality").selectOption(String(created.criticality));
+  await page.getByLabel("Data source").selectOption(created.source);
+  await page.getByRole("button", { name: "Create bin record" }).click();
+
+  await expect(page.getByRole("status")).toContainText(/Loaded 1 bins? from API/);
+  await expect(page.locator("#bins")).toContainText(created.id);
+  expect(postedPayload).toEqual({
+    id: created.id,
+    latitude: created.latitude,
+    longitude: created.longitude,
+    capacity_liters: created.capacity_liters,
+    criticality: created.criticality,
+    source: "live",
+  });
+});
+
+test("operator bin form does not submit without required source and measured fields", async ({ page }) => {
+  let createRequests = 0;
+  await page.route("**/api/v1/bins", async route => {
+    if (route.request().method() === "POST") createRequests += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.goto("/");
+  await page.getByLabel("Bin ID").fill("BIN-INCOMPLETE");
+  await page.getByRole("button", { name: "Create bin record" }).click();
+  expect(createRequests).toBe(0);
+  await expect(page.locator("#source")).toHaveValue("");
+  await expect(page.locator("#status")).toContainText(/Enter your locally configured operator token/);
+});
