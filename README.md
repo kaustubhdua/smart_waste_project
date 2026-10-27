@@ -35,7 +35,7 @@ A full-stack waste-operations engineering prototype combining IoT telemetry, col
 
 ## Highlights
 
-- **Telemetry ingestion:** per-device credentials, bin-scoped access, timestamp/freshness validation, duplicate-message idempotency, and stored reading history.
+- **Telemetry ingestion:** per-device credentials, bin-scoped access, timestamp/freshness validation, duplicate-message idempotency, stored reading history, and explicit source provenance (live/imported/demo).
 - **Collection lifecycle:** persistent jobs and service events, approval and assignment, start/complete/exception transitions, and completed-job verification.
 - **Route optimization:** OSRM road-distance matrices and route geometry combined with OR-Tools capacity-constrained vehicle routing.
 - **Transactional dispatch:** approved jobs are optimized against registered vehicles and assigned with route-plan history and service events.
@@ -86,7 +86,7 @@ flowchart LR
 6. Enter the configured `API_TOKEN` in the operator console. A fresh install starts with an empty database: no synthetic bins, readings, or vehicles are inserted by default.
 7. If you explicitly want a local walkthrough, set `SEED_DEMO_DATA=true` in `.env` and restart the API. Those records are synthetic and labelled as demo; never use them as live telemetry or as evidence of operational performance.
 
-For real telemetry, enroll a device through `POST /api/v1/devices`, securely store the one-time `X-Device-Token`, and send readings to `POST /api/v1/telemetry` using its enrolled `device_id`, bound `bin_id`, unique `message_id`, calibrated `fill_percent`, and timezone-aware timestamp. Device credentials can be rotated or revoked.
+When creating a bin through `POST /api/v1/bins`, explicitly set `source` to `live`, `imported`, or `demo`; the API rejects a missing source rather than guessing provenance. For real telemetry, enroll a device through `POST /api/v1/devices`, securely store the one-time `X-Device-Token`, and send readings to `POST /api/v1/telemetry` using its enrolled `device_id`, bound `bin_id`, unique `message_id`, calibrated `fill_percent`, and timezone-aware timestamp. Device credentials can be rotated or revoked.
 
 ### Legacy Streamlit / ML demonstration
 
