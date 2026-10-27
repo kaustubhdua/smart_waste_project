@@ -63,3 +63,14 @@ test("driver can start and complete an assigned stop", async ({ page }) => {
   await expect(page.getByText(/No assigned or in-progress jobs/)).toBeVisible();
   await expect(page.getByRole("status")).toContainText(/loaded 0 assigned stops/i);
 });
+
+
+test("bin registration requires explicit measured data and provenance", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByLabel("Latitude")).toHaveValue("");
+  await expect(page.getByLabel("Longitude")).toHaveValue("");
+  await expect(page.getByLabel("Capacity (liters)").first()).toHaveValue("");
+  await expect(page.getByLabel("Data source")).toHaveValue("");
+  await expect(page.getByLabel("Criticality")).toHaveValue("");
+  await expect(page.getByLabel("Data source")).toHaveAttribute("required", "");
+});
