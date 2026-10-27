@@ -17,7 +17,18 @@ test("operator console renders controls and reports invalid API token", async ({
   await expect(page.getByRole("status")).toContainText(/not authenticated/i);
 });
 
-test("operator console rejects insecure remote API hosts before sending credentials", async ({ page }) => {\n  let requestSent = false;\n  page.on("request", request => { if (request.url().startsWith("http://api.test/")) requestSent = true; });\n  await page.goto("/");\n  await page.getByLabel("API base URL").fill("http://api.test");\n  await page.getByLabel("Operator bearer token").fill("must-not-leave-browser");\n  await page.getByRole("button", { name: "Connect & load bins" }).click();\n  await expect(page.getByRole("status")).toContainText(/remote API hosts must use HTTPS/i);\n  expect(requestSent).toBe(false);\n});\n\ntest("driver view reports authentication failure and does not invent jobs", async ({ page }) => {
+test("operator console rejects insecure remote API hosts before sending credentials", async ({ page }) => {
+  let requestSent = false;
+  page.on("request", request => { if (request.url().startsWith("http://api.test/")) requestSent = true; });
+  await page.goto("/");
+  await page.getByLabel("API base URL").fill("http://api.test");
+  await page.getByLabel("Operator bearer token").fill("must-not-leave-browser");
+  await page.getByRole("button", { name: "Connect & load bins" }).click();
+  await expect(page.getByRole("status")).toContainText(/remote API hosts must use HTTPS/i);
+  expect(requestSent).toBe(false);
+});
+
+test("driver view reports authentication failure and does not invent jobs", async ({ page }) => {
   await page.route("**/api/v1/driver/jobs", async route => {
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Invalid driver credentials" }) });
   });
