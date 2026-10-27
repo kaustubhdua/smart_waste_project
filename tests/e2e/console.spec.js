@@ -5,6 +5,7 @@ test("operator console renders controls and reports invalid API token", async ({
   await expect(page).toHaveTitle(/WasteOps \| Collection Control/);
   await expect(page.getByText("WasteOps / Collection Control")).toBeVisible();
   await expect(page.getByLabel("Operator bearer token")).toHaveAttribute("type", "password");
+  await expect(page.getByRole("note")).toContainText(/operator token is sent to this host/i);
   await expect(page.getByRole("button", { name: "Connect & load bins" })).toBeVisible();
 
   await page.route("**/api/v1/bins", async route => {
@@ -23,6 +24,7 @@ test("driver view reports authentication failure and does not invent jobs", asyn
   await page.goto("/driver.html");
   await expect(page).toHaveTitle(/WasteOps \| Driver/);
   await expect(page.getByRole("heading", { name: "Driver sign-in" })).toBeVisible();
+  await expect(page.getByRole("note")).toContainText(/driver credentials are sent to this host/i);
   await page.getByLabel("API base URL").fill("http://api.test");
   await page.getByLabel("Driver ID").fill("DRIVER-E2E");
   await page.getByLabel("Driver token").fill("invalid-token");
