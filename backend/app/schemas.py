@@ -6,8 +6,8 @@ class BinCreate(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     capacity_liters: float = Field(gt=0, le=100000)
-    criticality: int = Field(default=1, ge=1, le=5)
-    source: str = Field(default="demo", pattern="^(live|imported|demo)$")
+    criticality: int = Field(ge=1, le=5)
+    source: str = Field(pattern="^(live|imported|demo)$")
 
 class BinOut(BinCreate):
     model_config = ConfigDict(from_attributes=True)

@@ -35,7 +35,7 @@ A full-stack waste-operations engineering prototype combining IoT telemetry, col
 
 ## Highlights
 
-- **Telemetry ingestion:** per-device credentials, bin-scoped access, timestamp/freshness validation, duplicate-message idempotency, and stored reading history.
+- **Telemetry ingestion:** per-device credentials, bin-scoped access, timestamp/freshness validation, duplicate-message idempotency, stored reading history, and explicit source provenance (`live`, `imported`, or `demo`).
 - **Collection lifecycle:** persistent jobs and service events, approval and assignment, start/complete/exception transitions, and completed-job verification.
 - **Route optimization:** OSRM road-distance matrices and route geometry combined with OR-Tools capacity-constrained vehicle routing.
 - **Transactional dispatch:** approved jobs are optimized against registered vehicles and assigned with route-plan history and service events.
@@ -64,6 +64,8 @@ flowchart LR
 
 ## Run locally
 
+The default stack starts with an empty database: it does not generate synthetic bins, telemetry or vehicles. Records shown in the console come from the configured API/database. To intentionally load labeled demonstration data for a walkthrough, set `SEED_DEMO_DATA=true` in `.env` and restart the stack. Never use demo records as evidence of real sensor activity or operational performance.
+
 ### Full-stack API + web console (recommended)
 
 **Prerequisites:** Docker with the Compose plugin.
@@ -83,9 +85,9 @@ flowchart LR
    ```
 
 5. Open the operator console at `http://localhost:8080`, API documentation at `http://localhost:8000/docs`, and health endpoints at `http://localhost:8000/health` and `/health/ready`.
-6. Enter the configured `API_TOKEN` in the operator console. Local configuration can seed clearly labelled demo records; do not treat them as live sensor data.
+6. Enter the configured `API_TOKEN` in the operator console. The default configuration starts empty. To intentionally seed synthetic demonstration records, set `SEED_DEMO_DATA=true` in `.env` and restart; never treat those records as live sensor data.
 
-For real telemetry, enroll a device through `POST /api/v1/devices`, securely store the one-time `X-Device-Token`, and send readings to `POST /api/v1/telemetry` using its enrolled `device_id`, bound `bin_id`, unique `message_id`, calibrated `fill_percent`, and timezone-aware timestamp. Device credentials can be rotated or revoked.
+When creating a bin through `POST /api/v1/bins`, explicitly set `source` to `live`, `imported`, or `demo`; the API rejects missing provenance rather than guessing. For real telemetry, enroll a device through `POST /api/v1/devices`, securely store the one-time `X-Device-Token`, and send readings to `POST /api/v1/telemetry` using its enrolled `device_id`, bound `bin_id`, unique `message_id`, calibrated `fill_percent`, and timezone-aware timestamp. Device credentials can be rotated or revoked.
 
 ### Legacy Streamlit / ML demonstration
 

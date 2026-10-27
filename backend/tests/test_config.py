@@ -58,3 +58,9 @@ def test_production_configuration_rejects_unsafe_settings(override):
 def test_development_configuration_keeps_local_sqlite_defaults():
     config = Settings(app_env="development", database_url="sqlite:///./local.db")
     validate_production_settings(config)
+
+
+def test_demo_data_is_opt_in_by_default(monkeypatch):
+    monkeypatch.delenv("SEED_DEMO_DATA", raising=False)
+    config = Settings(_env_file=None)
+    assert config.seed_demo_data is False
