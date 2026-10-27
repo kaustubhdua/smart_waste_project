@@ -28,6 +28,18 @@ test("operator console rejects insecure remote API hosts before sending credenti
   expect(requestSent).toBe(false);
 });
 
+test("driver view rejects insecure remote API hosts before sending credentials", async ({ page }) => {
+  let requestSent = false;
+  page.on("request", request => { if (request.url().startsWith("http://api.test/")) requestSent = true; });
+  await page.goto("/driver.html");
+  await page.getByLabel("API base URL").fill("http://api.test");
+  await page.getByLabel("Driver ID").fill("DRIVER-E2E");
+  await page.getByLabel("Driver token").fill("must-not-leave-browser");
+  await page.getByRole("button", { name: "Load assigned stops" }).click();
+  await expect(page.getByRole("status")).toContainText(/remote API hosts must use HTTPS/i);
+  expect(requestSent).toBe(false);
+});
+
 test("driver view reports authentication failure and does not invent jobs", async ({ page }) => {
   await page.route("**/api/v1/driver/jobs", async route => {
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Invalid driver credentials" }) });
