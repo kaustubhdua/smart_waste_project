@@ -85,3 +85,62 @@ test("operator console labels data provenance and avoids implying live telemetry
   }
   await expect(page.getByText(/the console does not invent telemetry/i)).toBeVisible();
 });
+
+test("operator console treats API-controlled labels as text, not executable markup", async ({ page }) => {
+  const hostileId = '<img src=x onerror=alert(1)>BIN-XSS';
+  let dialogOpened = false;
+  page.on("dialog", async dialog => {
+    dialogOpened = true;
+    await dialog.dismiss();
+  });
+  await page.route("**/api/v1/bins", async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{
+        id: hostileId,
+        latitude: 28.6,
+        longitude: 77.2,
+        capacity_liters: 1000,
+        criticality: 2,
+        source: "imported",
+      }]),
+    });
+  });
+  await page.route("**/api/v1/bins/**/history*", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/jobs**", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/vehicles", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Operator bearer token").fill("test-only-token");
+  await page.getByRole("button", { name: "Connect & load bins" }).click();
+  await expect(page.locator("#bins")).toContainText(hostileId);
+  await expect(page.locator("#bins img")).toHaveCount(0);
+  await expect(page.locator("#status")).toContainText(/loaded 1 bins from api/i);
+  expect(dialogOpened).toBe(false);
+});
+
+test("operator and driver views fit a narrow mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Connect & load bins" })).toBeVisible();
+  const operatorWidth = await page.evaluate(() => ({
+    document: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  expect(operatorWidth.document).toBeLessThanOrEqual(operatorWidth.viewport);
+
+  await page.goto("/driver.html");
+  await expect(page.getByRole("button", { name: "Load assigned stops" })).toBeVisible();
+  const driverWidth = await page.evaluate(() => ({
+    document: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  expect(driverWidth.document).toBeLessThanOrEqual(driverWidth.viewport);
+});
