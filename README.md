@@ -36,6 +36,7 @@ A full-stack waste-operations engineering prototype combining IoT telemetry, col
 ## Highlights
 
 - **Telemetry ingestion:** per-device credentials, bin-scoped access, timestamp/freshness validation, duplicate-message idempotency, stored reading history, and explicit source provenance (`live`, `imported`, or `demo`).
+- **Historical imports:** operators can upload validated CSV telemetry in the console; the API enforces row/size limits, rejects conflicting duplicates atomically, and labels accepted readings `imported` rather than `live`.
 - **Collection lifecycle:** persistent jobs and service events, approval and assignment, start/complete/exception transitions, and completed-job verification.
 - **Route optimization:** OSRM road-distance matrices and route geometry combined with OR-Tools capacity-constrained vehicle routing.
 - **Transactional dispatch:** approved jobs are optimized against registered vehicles and assigned with route-plan history and service events.
