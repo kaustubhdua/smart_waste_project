@@ -83,7 +83,8 @@ flowchart LR
    ```
 
 5. Open the operator console at `http://localhost:8080`, API documentation at `http://localhost:8000/docs`, and health endpoints at `http://localhost:8000/health` and `/health/ready`.
-6. Enter the configured `API_TOKEN` in the operator console. Local configuration can seed clearly labelled demo records; do not treat them as live sensor data.
+6. Enter the configured `API_TOKEN` in the operator console. A fresh install starts with an empty database: no synthetic bins, readings, or vehicles are inserted by default.
+7. If you explicitly want a local walkthrough, set `SEED_DEMO_DATA=true` in `.env` and restart the API. Those records are synthetic and labelled as demo; never use them as live telemetry or as evidence of operational performance.
 
 For real telemetry, enroll a device through `POST /api/v1/devices`, securely store the one-time `X-Device-Token`, and send readings to `POST /api/v1/telemetry` using its enrolled `device_id`, bound `bin_id`, unique `message_id`, calibrated `fill_percent`, and timezone-aware timestamp. Device credentials can be rotated or revoked.
 
@@ -96,7 +97,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Train the optional model artifact from the repository root with `python person2_ml_prediction.py`. The API loads an existing artifact for inference; it does not train the model during requests. The legacy Streamlit route solver uses approximate coordinate costs, while the backend optimizer uses road-network costs.
+Train the optional model artifact from the repository root with `python person2_ml_prediction.py`. The API loads an existing artifact for inference; it does not train the model during requests. Treat the repository's bundled/training data and any generated demo records as demonstration material unless their provenance is independently verified. Do not use model output for operational decisions without evaluation on real, representative sensor readings. The legacy Streamlit route solver uses approximate coordinate costs, while the backend optimizer uses road-network costs.
 
 ## How the workflow fits together
 
