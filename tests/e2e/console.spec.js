@@ -122,7 +122,7 @@ test("operator console treats API-controlled labels as text, not executable mark
   await page.getByRole("button", { name: "Connect & load bins" }).click();
   await expect(page.locator("#bins")).toContainText(hostileId);
   await expect(page.locator("#bins img")).toHaveCount(0);
-  await expect(page.locator("#status")).toContainText(/loaded 1 bins from api/i);
+  await expect(page.locator("#status")).toContainText(/loaded 1 bin from api/i);
   expect(dialogOpened).toBe(false);
 });
 
