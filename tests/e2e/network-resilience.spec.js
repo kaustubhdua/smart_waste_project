@@ -66,3 +66,15 @@ test("operator console does not mislabel failed telemetry lookups as empty histo
   await expect(page.locator("#status")).toContainText("telemetry history unavailable for 1 bin");
   await expect(page.locator("#status")).toHaveClass(/error/);
 });
+
+test("operator console warns when job data cannot be refreshed", async ({ page }) => {
+  await installLeafletStub(page);
+  await page.route("**/api/v1/bins", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/jobs?limit=100", route => route.abort());
+  await page.route("**/api/v1/vehicles", route => route.fulfill({ json: [] }));
+  await page.goto("/");
+  await page.locator("#token").fill("test-only-token");
+  await page.locator("#connect").click();
+  await expect(page.locator("#status")).toContainText("collection jobs or vehicles could not be refreshed");
+  await expect(page.locator("#status")).toHaveClass(/error/);
+});
