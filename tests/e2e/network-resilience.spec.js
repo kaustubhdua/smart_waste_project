@@ -49,3 +49,20 @@ test("driver view explains API network failures", async ({ page }) => {
   await expect(page.locator("#status")).toContainText("Could not reach the API");
   await expect(page.locator("#status")).toHaveClass(/error/);
 });
+
+test("operator console does not mislabel failed telemetry lookups as empty history", async ({ page }) => {
+  await installLeafletStub(page);
+  await page.route("**/api/v1/bins", route => route.fulfill({ json: [
+    { id: "BIN-REAL-01", capacity_liters: 120, source: "live", criticality: 3, latitude: 28.6, longitude: 77.2 },
+  ] }));
+  await page.route("**/api/v1/bins/BIN-REAL-01/history*", route => route.abort());
+  await page.route("**/api/v1/jobs?limit=100", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/vehicles", route => route.fulfill({ json: [] }));
+  await page.goto("/");
+  await page.locator("#token").fill("test-only-token");
+  await page.locator("#connect").click();
+  await expect(page.locator("#bins")).toContainText("telemetry unavailable");
+  await expect(page.locator("#bins")).not.toContainText("no readings yet");
+  await expect(page.locator("#status")).toContainText("telemetry history unavailable for 1 bin");
+  await expect(page.locator("#status")).toHaveClass(/error/);
+});
