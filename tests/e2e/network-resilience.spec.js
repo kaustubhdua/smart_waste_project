@@ -78,3 +78,20 @@ test("operator console warns when job data cannot be refreshed", async ({ page }
   await expect(page.locator("#status")).toContainText("collection jobs or vehicles could not be refreshed");
   await expect(page.locator("#status")).toHaveClass(/error/);
 });
+
+test("operator console still lists bins when the Leaflet map library cannot load", async ({ page }) => {
+  await page.route("https://unpkg.com/**", route => route.abort());
+  await page.route("**/api/v1/bins", route => route.fulfill({ json: [{
+    id: "BIN-NOMAP", latitude: 28.6, longitude: 77.2, capacity_liters: 800, criticality: 2, source: "imported",
+  }] }));
+  await page.route("**/api/v1/bins/**/history*", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/jobs?limit=100", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/vehicles", route => route.fulfill({ json: [] }));
+  await page.goto("/");
+  await page.locator("#token").fill("test-only-token");
+  await page.locator("#connect").click();
+  await expect(page.locator("#bins")).toContainText("BIN-NOMAP");
+  await expect(page.locator("#binCount")).toHaveText("1");
+  await expect(page.locator("#map")).toContainText("Map unavailable");
+  await expect(page.locator("#status")).toContainText("Loaded 1 bin from API");
+});
