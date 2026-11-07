@@ -294,31 +294,30 @@ test("operator can sign in with a named account, use an expiring session and sig
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        access_token: "opaque-session-for-browser-test",
-        token_type: "bearer",
         expires_at: "2026-11-08T12:00:00Z",
         user: { id: "user-1", username: "ops.dispatch", role: "operator" },
       }),
+      headers: { "Set-Cookie": "wasteops_session=opaque-session-for-browser-test; Path=/api/v1; HttpOnly; SameSite=Strict" },
     });
   });
   await page.route("**/api/v1/auth/me", async route => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "user-1", username: "ops.dispatch", role: "operator" }) });
   });
   await page.route("**/api/v1/bins", async route => {
-    observed.push(route.request().headers()["authorization"]);
+    observed.push(route.request().headers()["cookie"]);
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
   await page.route("**/api/v1/jobs**", async route => {
-    observed.push(route.request().headers()["authorization"]);
+    observed.push(route.request().headers()["cookie"]);
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
   await page.route("**/api/v1/vehicles", async route => {
-    observed.push(route.request().headers()["authorization"]);
+    observed.push(route.request().headers()["cookie"]);
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
   await page.route("**/api/v1/auth/logout", async route => {
-    observed.push(route.request().headers()["authorization"]);
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ logged_out: true }) });
+    observed.push(route.request().headers()["cookie"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ logged_out: true }), headers: { "Set-Cookie": "wasteops_session=; Path=/api/v1; Max-Age=0; HttpOnly; SameSite=Strict" } });
   });
 
   await page.goto("/");
@@ -327,13 +326,14 @@ test("operator can sign in with a named account, use an expiring session and sig
   await page.getByRole("button", { name: "Connect & load bins" }).click();
   await expect(page.getByRole("status")).toContainText(/Loaded 0 bins from API/i);
   expect(observed.length).toBeGreaterThan(0);
-  expect(observed.every(value => value === "Bearer opaque-session-for-browser-test")).toBe(true);
-  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBe("opaque-session-for-browser-test");
+  expect(observed.every(value => value?.includes("wasteops_session=opaque-session-for-browser-test"))).toBe(true);
+  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+  expect(await page.evaluate(() => document.cookie)).not.toContain("wasteops_session");
   await expect(page.locator("#operatorUsersPanel")).toBeHidden();
   await expect(page.locator("#passwordPanel")).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("status")).toContainText(/Signed out/i);
-  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
 });
 
 
