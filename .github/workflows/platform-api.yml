@@ -52,7 +52,7 @@ jobs:
         run: DATABASE_URL=sqlite:///./migration_test.db alembic upgrade head
       - run: python -m compileall -q app scripts
       - name: Verify demo seed is idempotent
-        run: DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo && DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo
+        run: SEED_DEMO_DATA=true DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo && SEED_DEMO_DATA=true DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo
       - name: Validate Docker Compose configuration
         working-directory: ${{ github.workspace }}
         run: POSTGRES_PASSWORD=ci-only-password API_TOKEN=ci-only-operator-token docker compose config --quiet
