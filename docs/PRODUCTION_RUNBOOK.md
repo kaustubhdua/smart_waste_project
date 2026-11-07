@@ -10,9 +10,9 @@ Do not use this prototype for unsupervised municipal operations until all P0 gat
 
 - Use a dedicated production environment and a durable managed PostgreSQL/PostGIS database.
 - Store `POSTGRES_PASSWORD` and `API_TOKEN` in a managed secret store; never commit `.env`, tokens, database URLs or device credentials.
-- Use `API_TOKEN` as a unique bootstrap secret of at least 32 characters. Use it once to create the first administrator, then keep it in the secret manager for controlled recovery; it is not accepted as a normal production operator credential.
-- Before opening the service, apply migrations through revision `0008_operator_identity`, bootstrap the first administrator over a trusted administrative network, sign in with the named account, and create named operator accounts. Verify the bootstrap endpoint refuses a second initialization.
-- Operator sessions expire after eight hours, are stored as hashes, and can be revoked by disabling the account. Eight consecutive failed password attempts trigger a 15-minute account lock. Put login behind ingress-level rate limiting as an additional distributed abuse control.
+- Use `API_TOKEN` as a unique bootstrap secret of at least 32 characters. Use it once to create the first administrator; it is not accepted as a normal production operator credential and the one-time bootstrap marker prevents reuse. Retain it only in the secret manager according to the incident-response policy; it is not an administrator password-reset mechanism.
+- Before opening the service, provision PostgreSQL with the PostGIS extension available to the migration role, then apply migrations through revision `0009_bin_geography_index`. The migration enables PostGIS and builds a functional geography GiST index for radius searches; managed database roles that cannot create extensions must have an administrator pre-enable PostGIS. Bootstrap the first administrator over a trusted administrative network, sign in with the named account, and create named operator accounts. Verify the bootstrap endpoint refuses a second initialization. If all administrator accounts are inaccessible, use the documented database-backup/restore and break-glass operations process; do not expose the bootstrap secret as an everyday login.
+- Operator sessions expire after eight hours, are delivered to the browser only through HttpOnly, SameSite=Strict cookies (Secure in production), stored as hashes, and can be revoked by disabling the account. Cookie-authenticated mutations validate Origin; keep the console/API same-origin and configure the exact HTTPS site origin in CORS_ORIGINS. The console never stores session credentials in localStorage or sessionStorage. Eight consecutive failed password attempts trigger a 15-minute account lock. Put login behind ingress-level rate limiting as an additional distributed abuse control.
 - Set `APP_ENV=production`, `AUTO_CREATE_SCHEMA=false`, `SEED_DEMO_DATA=false`, explicit trusted HTTPS `CORS_ORIGINS`, and a contracted or self-hosted HTTPS routing provider in `OSRM_BASE_URL`.
 - Keep database and application ports private. Terminate TLS at a maintained reverse proxy or managed ingress; configure security headers, request-size limits, timeouts and access logs.
 - Use a staging environment to rehearse migrations and releases before production.
@@ -24,10 +24,9 @@ Do not use this prototype for unsupervised municipal operations until all P0 gat
 3. Build images from that commit and scan dependencies/images using the team's approved tools.
 4. Back up the production database and confirm the backup completed.
 5. Apply Alembic migrations using the documented deployment process. Do not enable automatic schema creation in production.
-6. Verify `/health/ready` reports `schema_revision=0008_operator_identity` and `operator_auth=named_sessions`; readiness fails closed if Alembic metadata is missing or behind. `bootstrap_status=pending` means the first administrator still needs to be created through the private bootstrap procedure.
-7. Deploy to staging first; verify readiness, authenticated API access, operator and driver workflows, routing-provider connectivity and log/alert delivery.
-8. Promote the same immutable image artifacts to production.
-9. Run smoke tests, monitor errors and latency, and record the release decision and rollback owner.
+6. Deploy to staging first; verify readiness, authenticated API access, operator and driver workflows, routing-provider connectivity and log/alert delivery.
+7. Promote the same immutable image artifacts to production.
+8. Run smoke tests, monitor errors and latency, and record the release decision and rollback owner.
 
 ## 4. Backup and restore drill
 
@@ -78,3 +77,14 @@ Start with a supervised pilot and retain a manual collection fallback. Do not in
 ## 8. Rollback and post-release review
 
 Document the last known-good image, compatible database schema, rollback owner and communication path before deployment. Prefer forward fixes for irreversible schema changes; database rollback must not be assumed safe. After release, review alerts, errors, dispatch outcomes and operator feedback, and update the release record.
+
+
+## Database backup and restore
+
+The repository includes guarded custom-format PostgreSQL scripts:
+
+- Create a local backup: `bash scripts/backup-postgres.sh` (or pass an explicit destination path). Files are created with restrictive permissions and existing destination files are never overwritten.
+- Verify and restore a backup: `CONFIRM_RESTORE=YES bash scripts/restore-postgres.sh /absolute/path/to/backup.dump`. Restore refuses to run without the explicit confirmation variable, validates the archive first, stops the API and web services, and runs pg_restore in a single transaction before restarting the services.
+- Keep backups encrypted at rest and off-host, apply retention, and regularly perform restore drills in an isolated environment. The scripts do not provide encryption, off-site storage, scheduling, or a retention policy.
+- Before restoring production, verify the target environment, backup timestamp, database identity and incident approval. A restore replaces the target database state; do not point it at an unrelated environment.
+- CI exercises a backup, writes a marker record, restores the snapshot, and verifies that the post-snapshot record is absent.

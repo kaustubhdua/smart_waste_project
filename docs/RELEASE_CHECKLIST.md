@@ -29,7 +29,7 @@ Use this checklist for each release. Mark a task complete only when evidence is 
 
 ## P2 — maturity and portfolio presentation
 
-- [ ] Add spatial indexes/geospatial column usage if spatial query needs and benchmarks justify it.
+- [x] Add a functional PostGIS geography GiST index and authenticated nearby-bin radius endpoint; [ ] benchmark target fleet volumes before adding a stored geometry column.
 - [ ] Add retention policies, exportable audit reports and operational analytics.
 - [ ] Publish architecture and data-flow diagrams, screenshots or a recorded demo, API examples and a limitations section.
 - [ ] Keep dependency updates, security checks and CI status visible in the README.

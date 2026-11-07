@@ -2,7 +2,7 @@
 
 ## Scope and honest status
 
-This document identifies security boundaries for the Smart Waste Collection Platform. It is not a penetration-test report or certification. The operator API now supports named admin/operator accounts, salted PBKDF2 password hashes, eight-hour opaque sessions stored as SHA-256 hashes, account lockout after repeated failures, account/session revocation, administrator-only user/device/driver credential management, and security audit events. This is an application-level identity foundation, not a third-party identity provider or penetration-test certification.
+This document identifies security boundaries for the Smart Waste Collection Platform. It is not a penetration-test report or certification. The operator API now supports named admin/operator accounts, salted PBKDF2 password hashes, eight-hour HttpOnly/SameSite=Strict browser cookies (Secure in production), opaque session tokens stored only as SHA-256 hashes, Origin validation on cookie-authenticated mutations, account lockout after repeated failures, account/session revocation, administrator-only user/device/driver credential management, and security audit events. This is an application-level identity foundation, not a third-party identity provider or penetration-test certification.
 
 ## Assets
 
@@ -32,7 +32,8 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 | Device token theft or replay | False readings or data tampering for a bin | TLS, per-device scope, rotation/revocation, idempotency, anomaly detection, rate limits, clock validation; test revoked and cross-bin credentials |
 | Driver credential misuse | Unauthorized job transitions or operational disruption | Short-lived driver identity, vehicle-scoped authorization, revocation, audit events; test cross-driver and cross-vehicle access |
 | Public API/database exposure | Data theft or service compromise | Private network, TLS ingress, no public DB port, firewall/security groups, secure headers, deployment scan |
-| Secret leakage in Git/logs/browser | Account compromise | Secret manager, scanning, log redaction, token-free client bundles, rotate exposed credentials and inspect history |
+| Secret leakage in Git/logs/browser | Account compromise | Secret manager, scanning, log redaction, HttpOnly cookie sessions, no token in JavaScript storage or login JSON, rotate exposed credentials and inspect history |
+| Cross-site request forgery against browser session | Unauthorized state changes | SameSite=Strict HttpOnly cookie, strict Origin allowlist on cookie-authenticated mutations, credentialed CORS only for exact trusted origins, same-origin deployment; test malicious and allowed Origin values |
 | Malicious/oversized CSV | Resource exhaustion or polluted data | Upload limits, schema validation, row limits, transaction safety, content validation, rate limits and abuse tests |
 | Duplicate/concurrent dispatch | Double assignment or capacity violations | Database constraints/transactions, concurrency tests, idempotent operations and invariants checked after racing requests |
 | Routing-provider outage or manipulated response | Dispatch failure or unsafe route plan | Contracted/self-hosted provider, timeouts, bounded input, explicit failure behavior, response validation and manual fallback |
@@ -49,7 +50,8 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 - [ ] Every role is tested against read/write/delete/dispatch/verification/export endpoints.
 - [ ] Device A cannot submit telemetry for Bin B.
 - [ ] Driver A cannot read or transition Driver B's vehicle jobs.
-- [ ] Cross-origin requests are limited to explicitly trusted HTTPS origins.
+- [x] Cookie-authenticated state changes reject untrusted/missing Origin values; the trusted local origin and malicious-origin rejection are covered by automated tests.
+- [ ] Production CORS origins and the reverse-proxy host/origin configuration are reviewed during deployment.
 - [ ] Oversized CSV, malformed values, timestamp skew, duplicate IDs, and invalid transitions fail safely.
 - [ ] Parallel dispatch attempts cannot assign a job or vehicle inconsistently.
 - [ ] Secrets are absent from browser bundles, logs, screenshots, workflow output, and tracked configuration.

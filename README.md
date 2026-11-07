@@ -17,7 +17,7 @@ A full-stack waste-operations engineering prototype combining IoT telemetry, col
 
 </div>
 
-> **Honest status:** This is a portfolio/engineering prototype, not a proven municipal deployment. Demo records are synthetic, and no physical sensor calibration, production restore drill, live field pilot, or operational-savings claim has been validated. Review the [release checklist](docs/RELEASE_CHECKLIST.md) before treating it as production software.
+> **Honest status:** This is a portfolio/engineering prototype, not a proven municipal deployment. Demo records are synthetic and can only be seeded by explicitly setting `SEED_DEMO_DATA=true` outside production. No physical sensor calibration, production restore drill, live field pilot, or operational-savings claim has been validated. Review the [release checklist](docs/RELEASE_CHECKLIST.md) before treating it as production software.
 
 ## Contents
 
@@ -122,12 +122,13 @@ Train the optional model artifact from the repository root with `python person2_
 | `POST` | `/api/v1/auth/login` | Sign in and issue an eight-hour session |
 | `GET` | `/api/v1/auth/me` | Inspect current operator identity |
 | `POST` | `/api/v1/auth/logout` | Revoke current session |
-| `POST` | `/api/v1/auth/change-password` | Change password and revoke other sessions |
+| `POST` | `/api/v1/auth/change-password` | Change password, revoke all previous sessions and rotate the current session |
 | `GET/POST` | `/api/v1/auth/users` | List/create named accounts (admin only) |
 | `POST` | `/api/v1/auth/users/{username}/revoke` | Disable account and revoke sessions (admin only) |
 | `GET` | `/api/v1/auth/audit` | Inspect security audit events (admin only) |
 | `POST` | `/api/v1/bins` | Register a bin |
 | `GET` | `/api/v1/bins` | List active bins |
+| `GET` | `/api/v1/bins/nearby` | Find active bins within a radius using PostGIS geography and a GiST index |
 | `POST` | `/api/v1/devices` | Enroll a device and issue its one-time token |
 | `GET` | `/api/v1/devices` | List device status without revealing tokens |
 | `POST` | `/api/v1/devices/{device_id}/rotate-token` | Rotate a device credential |
@@ -172,12 +173,12 @@ Browser tests run in GitHub Actions using Playwright Chromium. They mock API res
 
 ## Security and deployment
 
-The web container reverse-proxies `/api/*` and health/API documentation routes to the API over the private Compose network. Both browser views default to same-origin API access, so a hosted HTTPS deployment does not accidentally call `localhost` on each visitor's device. For an external API origin, configure it explicitly in the UI and set the API's trusted CORS origins accordingly.
+The web container reverse-proxies `/api/*` and health/API documentation routes to the API over the private Compose network. Both browser views default to same-origin API access, so a hosted HTTPS deployment does not accidentally call `localhost` on each visitor's device. Keep the browser console and API same-origin for first-party cookie authentication. Non-browser integrations should use a cookie jar from the login flow or a separately managed service identity; this project does not issue long-lived operator API tokens. Never store browser sessions in JavaScript storage.
 
 - Production startup rejects SQLite, weak/placeholder bootstrap secrets, automatic schema creation, demo seeding, unsafe CORS settings, and the public demo OSRM router.
-- Named operator/admin accounts use salted PBKDF2 password hashes, eight-hour opaque sessions stored as hashes, account lockout, account/session revocation, and audit events. The shared API_TOKEN is a one-time bootstrap secret in production and remains a local-development compatibility credential only.
+- Named operator/admin accounts use salted PBKDF2 password hashes, eight-hour HttpOnly/SameSite=Strict browser cookies (Secure in production), opaque session hashes, account lockout, account/session revocation, password-change session rotation, and audit events. Cookie-authenticated state changes validate the request Origin; browser credentials are never exposed to JavaScript storage. The shared API_TOKEN is a one-time bootstrap secret in production and remains a local-development compatibility credential only.
 - Nginx adds browser security headers and a Content Security Policy. Operator and driver JavaScript is served from same-origin files, so `script-src` does not allow `unsafe-inline`. Inline styles still require `unsafe-inline` and remain a hardening opportunity.
-- Application-level admin/operator roles are implemented, but external SSO/OAuth, MFA, ingress-level distributed rate limiting, and a formal penetration test remain outstanding.
+- Application-level admin/operator roles are implemented, but external SSO/OAuth, MFA, distributed ingress rate limiting beyond the included Nginx per-IP login/bootstrap limit, and a formal penetration test remain outstanding.
 - Use a contracted or self-hosted routing service for deployment. The public OSRM demo service is for development only.
 - Before public exposure, configure managed secrets, HTTPS/TLS, private database networking, rate limits, logs/alerts, automated encrypted backups and a tested restore procedure.
 - Follow the [production operations runbook](docs/PRODUCTION_RUNBOOK.md) and [release acceptance checklist](docs/RELEASE_CHECKLIST.md). Do not mark unchecked acceptance gates complete without evidence.
