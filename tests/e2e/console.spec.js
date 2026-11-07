@@ -373,6 +373,28 @@ test("administrator can provision and revoke operator accounts from the console"
     accounts = accounts.map(user => user.username === "field.operator" ? { ...user, active: false } : user);
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ username: "field.operator", active: false, sessions_revoked: true }) });
   });
+  let devices = [{ id: "sensor-01", bin_id: "bin-01", active: true }];
+  let drivers = [{ id: "driver-01", vehicle_id: "truck-01", active: true }];
+  await page.route("**/api/v1/devices", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(devices) });
+  });
+  await page.route("**/api/v1/drivers", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(drivers) });
+  });
+  await page.route("**/api/v1/devices/sensor-01/rotate-token", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "sensor-01", token: "new-sensor-token" }) });
+  });
+  await page.route("**/api/v1/devices/sensor-01", async route => {
+    devices = devices.map(item => ({ ...item, active: false }));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "sensor-01", active: false }) });
+  });
+  await page.route("**/api/v1/drivers/driver-01/rotate-token", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "driver-01", token: "new-driver-token" }) });
+  });
+  await page.route("**/api/v1/drivers/driver-01", async route => {
+    drivers = drivers.map(item => ({ ...item, active: false }));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "driver-01", active: false }) });
+  });
   await page.route("**/api/v1/auth/change-password", async route => {
     expect(route.request().postDataJSON()).toEqual({ current_password: "old-password-123", new_password: "new-password-12345" });
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ password_changed: true, other_sessions_revoked: true }) });
@@ -389,6 +411,18 @@ test("administrator can provision and revoke operator accounts from the console"
   await expect(page.locator("#deviceAdminPanel")).toBeVisible();
   await expect(page.locator("#driverAdminPanel")).toBeVisible();
   await expect(page.locator("#operatorUsers")).toContainText("rootadmin");
+  await expect(page.locator("#deviceCredentials")).toContainText("sensor-01");
+  await expect(page.locator("#driverCredentials")).toContainText("driver-01");
+  const deviceRow = page.locator("#deviceCredentials .job").filter({ hasText: "sensor-01" });
+  await deviceRow.getByRole("button", { name: "Rotate token" }).click();
+  await expect(page.locator("#credentialResult")).toContainText("new-sensor-token");
+  await deviceRow.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.locator("#deviceCredentials")).toContainText("sensor-01 · bin bin-01 · revoked");
+  const driverRow = page.locator("#driverCredentials .job").filter({ hasText: "driver-01" });
+  await driverRow.getByRole("button", { name: "Rotate token" }).click();
+  await expect(page.locator("#credentialResult")).toContainText("new-driver-token");
+  await driverRow.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.locator("#driverCredentials")).toContainText("driver-01 · vehicle truck-01 · revoked");
   await page.getByLabel("Username", { exact: true }).fill("field.operator");
   await page.getByLabel("Temporary password (12+ characters)").fill("field-operator-password");
   await page.getByLabel("Role").selectOption("operator");
