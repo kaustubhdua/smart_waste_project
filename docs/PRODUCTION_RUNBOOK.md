@@ -24,9 +24,10 @@ Do not use this prototype for unsupervised municipal operations until all P0 gat
 3. Build images from that commit and scan dependencies/images using the team's approved tools.
 4. Back up the production database and confirm the backup completed.
 5. Apply Alembic migrations using the documented deployment process. Do not enable automatic schema creation in production.
-6. Deploy to staging first; verify readiness, authenticated API access, operator and driver workflows, routing-provider connectivity and log/alert delivery.
-7. Promote the same immutable image artifacts to production.
-8. Run smoke tests, monitor errors and latency, and record the release decision and rollback owner.
+6. Verify `/health/ready` reports `schema_revision=0008_operator_identity` and `operator_auth=named_sessions`; readiness fails closed if Alembic metadata is missing or behind. `bootstrap_status=pending` means the first administrator still needs to be created through the private bootstrap procedure.
+7. Deploy to staging first; verify readiness, authenticated API access, operator and driver workflows, routing-provider connectivity and log/alert delivery.
+8. Promote the same immutable image artifacts to production.
+9. Run smoke tests, monitor errors and latency, and record the release decision and rollback owner.
 
 ## 4. Backup and restore drill
 
