@@ -173,6 +173,8 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
         replayed = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"in_progress"}, headers=start_headers)
         assert replayed.status_code == 200
         assert replayed.json() == started.json()
+        changed_payload = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"in_progress","note":"different payload"}, headers=start_headers)
+        assert changed_payload.status_code == 409
         conflicting_reuse = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"completed"}, headers=start_headers)
         assert conflicting_reuse.status_code == 409
         events = client.get(f"/api/v1/jobs/{job_id}/events", headers=OP).json()
