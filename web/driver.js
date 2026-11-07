@@ -164,6 +164,7 @@ async function renderQueue() {
         if (!confirm("Discard this unsent driver action? The server has not confirmed it.")) return;
         await deleteRecord("actions", action.idempotencyKey);
         await renderQueue();
+        await loadJobs();
       }));
     }
     root.append(row);
