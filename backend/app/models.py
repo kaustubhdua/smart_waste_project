@@ -153,5 +153,6 @@ class DriverAction(Base):
     driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.id"), index=True)
     job_id: Mapped[str] = mapped_column(ForeignKey("collection_jobs.id"), index=True)
     action: Mapped[str] = mapped_column(String(30))
+    request_hash: Mapped[str] = mapped_column(String(64))
     response_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
