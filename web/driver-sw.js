@@ -43,7 +43,7 @@ self.addEventListener("fetch", event => {
         const update = fetch(request).then(response => {
           if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
           return response;
-        });
+        }).catch(() => cached);
         return cached || update;
       })
     );
