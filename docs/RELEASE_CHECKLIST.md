@@ -17,8 +17,8 @@ Use this checklist for each release. Mark a task complete only when evidence is 
 
 ## P1 — complete release quality
 
-- [ ] Browser-driven end-to-end tests cover operator and driver journeys, including authentication, errors and responsive layouts.
-- [ ] Lifecycle tests cover create/approve/dispatch/start/complete/verify, vehicle release, exceptions, duplicate requests, retries and concurrent dispatch.
+- [ ] Browser-driven end-to-end tests cover operator and driver journeys, including authentication, offline shell loading, queued actions across reload, idempotent replay, errors and responsive layouts.
+- [ ] Lifecycle tests cover create/approve/dispatch/start/complete/verify, vehicle release, exceptions, duplicate requests, idempotent driver retries and concurrent dispatch.
 - [ ] Migration tests cover an empty database and supported upgrade paths using the production database engine.
 - [ ] Load/soak tests exercise documented target volumes and concurrency; publish results and limits.
 - [ ] Accessibility review covers keyboard use, focus, contrast, labels, error announcements and mobile usability.
