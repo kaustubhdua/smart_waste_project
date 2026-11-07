@@ -8,7 +8,7 @@ This repository is being evolved from a Streamlit/ML/routing prototype into a ba
 2. Run `docker compose up --build`.
 3. Open `http://localhost:8000/docs` for the interactive API and `http://localhost:8000/health` for the health check.
 
-Never commit `.env` or expose operator tokens in a public deployment. Enroll individual devices from the operator API; device credentials are returned once, hashed at rest, and scoped to one bin.
+Never commit `.env` or expose bootstrap credentials in a public deployment. Production operator access uses named accounts and expiring, revocable sessions. Enroll individual devices from the administrator console; device credentials are returned once, hashed at rest, and scoped to one bin.
 
 ## Local API tests
 
@@ -26,14 +26,16 @@ The API defaults to a local SQLite database for development. Docker Compose conf
 
 From the repository root, install `requirements.txt` and run `python person2_ml_prediction.py`. This trains a one-step-ahead model on the configured CSV and writes `models/waste_model.pkl`. The Compose stack mounts that directory read-only; rebuild/restart the API after training. The forecasts endpoint returns HTTP 503 when no artifact exists and skips bins without fresh temperature readings or enough history. The current model is not a validated 6/12-hour forecast. Keep `USE_MODEL_FOR_DISPATCH=false` until evaluation on representative field data supports enabling it.
 
-## API flow
+## Operator identity and API flow
 
-1. Create a bin using `POST /api/v1/bins` with an operator bearer token.
-2. Enroll a device with `POST /api/v1/devices`, then send telemetry to `POST /api/v1/telemetry` using the returned per-device `X-Device-Token`. Tokens can be rotated or revoked.
-3. Inspect readings using `GET /api/v1/bins/{bin_id}/history`.
-4. Create a collection candidate with `POST /api/v1/jobs`.
-5. Move a job through validated transitions using `POST /api/v1/jobs/{job_id}/transitions`.
-6. Approve eligible jobs, register vehicles, and dispatch selected jobs through `POST /api/v1/routes/dispatch`. This obtains OSRM road-network costs, optimizes against registered capacities, persists the route plan, and records vehicle assignment events.
+1. On a fresh database, create the first administrator once with `POST /api/v1/auth/bootstrap`, send `X-Bootstrap-Token: $API_TOKEN`, and provide a unique username plus a password of at least 12 characters. The bootstrap credential is never returned by the browser UI.
+2. Sign in through `POST /api/v1/auth/login` with the username and password. The API returns a random opaque bearer session that expires after eight hours; only its SHA-256 hash is stored. The operator console now supports this sign-in flow.
+3. Administrators create named operator/admin accounts through `POST /api/v1/auth/users`, revoke accounts and all their sessions through `POST /api/v1/auth/users/{username}/revoke`, and inspect security events through `GET /api/v1/auth/audit`.
+4. Create a bin using `POST /api/v1/bins` with an operator session. Enroll devices and drivers using administrator privileges; each credential is returned once, hashed at rest, and scoped to its bin or vehicle.
+5. Send telemetry to `POST /api/v1/telemetry` using the device's `X-Device-Token`, then inspect readings using `GET /api/v1/bins/{bin_id}/history`.
+6. Create collection candidates using `POST /api/v1/jobs`, approve eligible jobs, register vehicles, and dispatch selected jobs through `POST /api/v1/routes/dispatch`. The API obtains road-network costs, optimizes against registered capacities, persists the route plan, and records assignment events.
+
+The old shared `API_TOKEN` is accepted as an operator credential only when `APP_ENV` is not `production`, to keep local development and existing test workflows simple. In production it is a one-time bootstrap secret only; it is not accepted on normal operator endpoints.
 
 ## Data truthfulness
 
@@ -41,4 +43,4 @@ Every bin has a `source` of `live`, `imported`, or `demo`. Telemetry ingestion i
 
 ## Production configuration guardrails
 
-Set `APP_ENV=production` to make the API refuse unsafe startup configuration. Production requires a non-SQLite durable database, an `API_TOKEN` with at least 32 characters, `AUTO_CREATE_SCHEMA=false`, `SEED_DEMO_DATA=false`, and explicit trusted HTTPS origins in `CORS_ORIGINS`. Apply schema changes through Alembic migrations. Compose publishes database, API, and web ports on loopback by default and includes readiness/health checks; keep these binds local and terminate TLS at a properly configured reverse proxy. The guard prevents common misconfiguration; it is not a substitute for identity-based RBAC, managed secrets, backups, monitoring, and a security review.
+Set `APP_ENV=production` to make the API refuse unsafe startup configuration. Production requires a non-SQLite durable database, a unique `API_TOKEN` of at least 32 characters for one-time initial-admin bootstrap, `AUTO_CREATE_SCHEMA=false`, `SEED_DEMO_DATA=false`, a trusted HTTPS routing provider, and explicit trusted HTTPS origins in `CORS_ORIGINS`. Apply schema changes through Alembic migrations. Compose publishes database, API, and web ports on loopback by default and includes readiness/health checks; keep these binds local and terminate TLS at a properly configured reverse proxy. The guard prevents common misconfiguration; it is not a substitute for identity-based RBAC, managed secrets, backups, monitoring, and a security review.
