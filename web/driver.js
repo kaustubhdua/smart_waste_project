@@ -330,7 +330,7 @@ async function syncQueue() {
     }
     await renderQueue();
     const remaining = await queuedActions($("driverId").value.trim());
-    if (!remaining.some(action => !action.blocked)) {
+    if (actions.length && !remaining.some(action => !action.blocked)) {
       await loadJobs();
       if (!remaining.length) setStatus("All queued driver actions have been confirmed by the server.", "ok");
     }
