@@ -345,11 +345,10 @@ test("administrator can provision and revoke operator accounts from the console"
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        access_token: "admin-session",
-        token_type: "bearer",
         expires_at: "2026-11-08T12:00:00Z",
         user: { id: "admin-1", username: "rootadmin", role: "admin" },
       }),
+      headers: { "Set-Cookie": "wasteops_session=admin-session; Path=/api/v1; HttpOnly; SameSite=Strict" },
     });
   });
   await page.route("**/api/v1/auth/me", async route => {
