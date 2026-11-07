@@ -281,3 +281,52 @@ test("operator can import historical telemetry with multipart form data and hone
   expect(uploadRequest.headers()["content-type"]).toMatch(/^multipart\/form-data; boundary=/i);
   expect(uploadRequest.headers()["authorization"]).toBe("Bearer test-only-token");
 });
+
+
+test("operator can sign in with a named account, use an expiring session and sign out", async ({ page }) => {
+  const observed = [];
+  await page.route("**/api/v1/auth/login", async route => {
+    expect(route.request().postDataJSON()).toEqual({
+      username: "ops.dispatch",
+      password: "a-long-test-password",
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        access_token: "opaque-session-for-browser-test",
+        token_type: "bearer",
+        expires_at: "2026-11-08T12:00:00Z",
+        user: { id: "user-1", username: "ops.dispatch", role: "operator" },
+      }),
+    });
+  });
+  await page.route("**/api/v1/bins", async route => {
+    observed.push(route.request().headers()["authorization"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/jobs?limit=100", async route => {
+    observed.push(route.request().headers()["authorization"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/vehicles", async route => {
+    observed.push(route.request().headers()["authorization"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/auth/logout", async route => {
+    observed.push(route.request().headers()["authorization"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ logged_out: true }) });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Operator username").fill("ops.dispatch");
+  await page.getByLabel("Password").fill("a-long-test-password");
+  await page.getByRole("button", { name: "Connect & load bins" }).click();
+  await expect(page.getByRole("status")).toContainText(/Loaded 0 bins from API/i);
+  expect(observed.length).toBeGreaterThan(0);
+  expect(observed.every(value => value === "Bearer opaque-session-for-browser-test")).toBe(true);
+  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBe("opaque-session-for-browser-test");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBeNull();
+  await expect(page.getByRole("status")).toContainText(/Signed out/i);
+});
