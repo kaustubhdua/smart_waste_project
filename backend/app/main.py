@@ -24,7 +24,7 @@ from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 from .priority import calculate_priority
 
-app = FastAPI(title="Smart Waste Operations API", version="1.1.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
+app = FastAPI(title="Smart Waste Operations API", version="1.2.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
 if settings.auto_create_schema:
     Base.metadata.create_all(bind=engine)
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'DELETE', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Bootstrap-Token', 'X-Device-Token', 'X-Driver-Id', 'X-Driver-Token'])
@@ -246,7 +246,13 @@ def revoke_operator_user(username: str, principal: dict = Depends(get_current_op
     db.commit()
     return {"username": user.username, "active": False, "sessions_revoked": True}
 
-@app.get("/health")
+
+
+@app.get("/api/v1/auth/audit", dependencies=[Depends(require_admin)])
+def list_operator_audit(limit: int = 100, db: Session = Depends(get_db)):
+    rows = db.scalars(select(OperatorAuditEvent).order_by(OperatorAuditEvent.created_at.desc()).limit(max(1, min(limit, 500))))
+    return [{"id": row.id, "actor_user_id": row.actor_user_id, "action": row.action, "subject": row.subject, "created_at": row.created_at} for row in rows]
+\n@app.get("/health")
 def health():
     return {"status": "ok", "service": "smart-waste-api"}
 
@@ -662,7 +668,7 @@ def _driver_auth(driver_id: str | None, token: str | None, db: Session) -> Drive
     driver.last_seen_at = datetime.now(timezone.utc)
     return driver
 
-@app.post("/api/v1/drivers", dependencies=[Depends(require_operator)], status_code=201)
+@app.post("/api/v1/drivers", dependencies=[Depends(require_admin)], status_code=201)
 def register_driver(payload: DriverCreate, db: Session = Depends(get_db)):
     if db.get(Driver, payload.id):
         raise HTTPException(409, "Driver already exists")
@@ -675,12 +681,12 @@ def register_driver(payload: DriverCreate, db: Session = Depends(get_db)):
     db.commit()
     return {"id": driver.id, "vehicle_id": driver.vehicle_id, "token": raw_token, "token_notice": "Store this token securely; it will not be shown again."}
 
-@app.get("/api/v1/drivers", dependencies=[Depends(require_operator)])
+@app.get("/api/v1/drivers", dependencies=[Depends(require_admin)])
 def list_drivers(db: Session = Depends(get_db)):
     rows = db.scalars(select(Driver).order_by(Driver.id))
     return [{"id": d.id, "vehicle_id": d.vehicle_id, "active": d.active, "last_seen_at": d.last_seen_at} for d in rows]
 
-@app.post("/api/v1/drivers/{driver_id}/rotate-token", dependencies=[Depends(require_operator)])
+@app.post("/api/v1/drivers/{driver_id}/rotate-token", dependencies=[Depends(require_admin)])
 def rotate_driver_token(driver_id: str, db: Session = Depends(get_db)):
     driver = db.get(Driver, driver_id)
     if not driver:
@@ -691,7 +697,7 @@ def rotate_driver_token(driver_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"id": driver.id, "token": raw_token, "token_notice": "Store this token securely; the previous token is now invalid."}
 
-@app.delete("/api/v1/drivers/{driver_id}", dependencies=[Depends(require_operator)])
+@app.delete("/api/v1/drivers/{driver_id}", dependencies=[Depends(require_admin)])
 def revoke_driver(driver_id: str, db: Session = Depends(get_db)):
     driver = db.get(Driver, driver_id)
     if not driver:
