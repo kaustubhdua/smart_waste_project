@@ -330,6 +330,8 @@ test("operator can sign in with a named account, use an expiring session and sig
   expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
   expect(await page.evaluate(() => document.cookie)).not.toContain("wasteops_session");
   await expect(page.locator("#operatorUsersPanel")).toBeHidden();
+  await expect(page.locator("#deviceAdminPanel")).toBeHidden();
+  await expect(page.locator("#driverAdminPanel")).toBeHidden();
   await expect(page.locator("#passwordPanel")).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Connect & load bins" }).click();
@@ -384,6 +386,8 @@ test("administrator can provision and revoke operator accounts from the console"
   await page.getByLabel("Password", { exact: true }).fill("admin-password-123");
   await page.getByRole("button", { name: "Connect & load bins" }).click();
   await expect(page.locator("#operatorUsersPanel")).toBeVisible();
+  await expect(page.locator("#deviceAdminPanel")).toBeVisible();
+  await expect(page.locator("#driverAdminPanel")).toBeVisible();
   await expect(page.locator("#operatorUsers")).toContainText("rootadmin");
   await page.getByLabel("Username", { exact: true }).fill("field.operator");
   await page.getByLabel("Temporary password (12+ characters)").fill("field-operator-password");
