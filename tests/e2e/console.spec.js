@@ -242,7 +242,7 @@ test("operator bin form does not submit without required source and measured fie
   await page.getByRole("button", { name: "Create bin record" }).click();
   expect(createRequests).toBe(0);
   await expect(page.locator("#source")).toHaveValue("");
-  await expect(page.locator("#status")).toContainText(/Enter your locally configured operator token/);
+  await expect(page.locator("#status")).toContainText(/Sign in with your named operator account/);
 });
 
 test("operator can import historical telemetry with multipart form data and honest provenance", async ({ page }) => {
@@ -280,4 +280,118 @@ test("operator can import historical telemetry with multipart form data and hone
   expect(uploadRequest.method()).toBe("POST");
   expect(uploadRequest.headers()["content-type"]).toMatch(/^multipart\/form-data; boundary=/i);
   expect(uploadRequest.headers()["authorization"]).toBe("Bearer test-only-token");
+});
+
+
+test("operator can sign in with a named account, use an expiring session and sign out", async ({ page }) => {
+  const observed = [];
+  await page.route("**/api/v1/auth/login", async route => {
+    expect(route.request().postDataJSON()).toEqual({
+      username: "ops.dispatch",
+      password: "a-long-test-password",
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        access_token: "opaque-session-for-browser-test",
+        token_type: "bearer",
+        expires_at: "2026-11-08T12:00:00Z",
+        user: { id: "user-1", username: "ops.dispatch", role: "operator" },
+      }),
+    });
+  });
+  await page.route("**/api/v1/auth/me", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "user-1", username: "ops.dispatch", role: "operator" }) });
+  });
+  await page.route("**/api/v1/bins", async route => {
+    observed.push(route.request().headers()["authorization"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/jobs**", async route => {
+    observed.push(route.request().headers()["authorization"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/vehicles", async route => {
+    observed.push(route.request().headers()["authorization"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/v1/auth/logout", async route => {
+    observed.push(route.request().headers()["authorization"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ logged_out: true }) });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Operator username").fill("ops.dispatch");
+  await page.getByLabel("Password", { exact: true }).fill("a-long-test-password");
+  await page.getByRole("button", { name: "Connect & load bins" }).click();
+  await expect(page.getByRole("status")).toContainText(/Loaded 0 bins from API/i);
+  expect(observed.length).toBeGreaterThan(0);
+  expect(observed.every(value => value === "Bearer opaque-session-for-browser-test")).toBe(true);
+  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBe("opaque-session-for-browser-test");
+  await expect(page.locator("#operatorUsersPanel")).toBeHidden();
+  await expect(page.locator("#passwordPanel")).toBeVisible();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("status")).toContainText(/Signed out/i);
+  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBeNull();
+});
+
+
+test("administrator can provision and revoke operator accounts from the console", async ({ page }) => {
+  let accounts = [{ id: "admin-1", username: "rootadmin", role: "admin", active: true }];
+  page.on("dialog", dialog => dialog.accept());
+  await page.route("**/api/v1/auth/login", async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        access_token: "admin-session",
+        token_type: "bearer",
+        expires_at: "2026-11-08T12:00:00Z",
+        user: { id: "admin-1", username: "rootadmin", role: "admin" },
+      }),
+    });
+  });
+  await page.route("**/api/v1/auth/me", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "admin-1", username: "rootadmin", role: "admin" }) });
+  });
+  await page.route("**/api/v1/auth/users", async route => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON();
+      accounts.push({ id: "operator-1", username: body.username, role: body.role, active: true });
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ id: "operator-1", username: body.username, role: body.role, active: true }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accounts) });
+  });
+  await page.route("**/api/v1/auth/users/field.operator/revoke", async route => {
+    accounts = accounts.map(user => user.username === "field.operator" ? { ...user, active: false } : user);
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ username: "field.operator", active: false, sessions_revoked: true }) });
+  });
+  await page.route("**/api/v1/auth/change-password", async route => {
+    expect(route.request().postDataJSON()).toEqual({ current_password: "old-password-123", new_password: "new-password-12345" });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ password_changed: true, other_sessions_revoked: true }) });
+  });
+  await page.route("**/api/v1/bins", async route => route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+  await page.route("**/api/v1/jobs**", async route => route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+  await page.route("**/api/v1/vehicles", async route => route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+
+  await page.goto("/");
+  await page.getByLabel("Operator username").fill("rootadmin");
+  await page.getByLabel("Password", { exact: true }).fill("admin-password-123");
+  await page.getByRole("button", { name: "Connect & load bins" }).click();
+  await expect(page.locator("#operatorUsersPanel")).toBeVisible();
+  await expect(page.locator("#operatorUsers")).toContainText("rootadmin");
+  await page.getByLabel("Username", { exact: true }).fill("field.operator");
+  await page.getByLabel("Temporary password (12+ characters)").fill("field-operator-password");
+  await page.getByLabel("Role").selectOption("operator");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.locator("#operatorUsers")).toContainText("field.operator");
+  const operatorRow = page.locator("#operatorUsers .job").filter({ hasText: "field.operator" });
+  await operatorRow.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.locator("#operatorUsers")).toContainText("field.operator · operator · disabled");
+  await page.getByLabel("Current password").fill("old-password-123");
+  await page.getByLabel("New password (12+ characters)").fill("new-password-12345");
+  await page.getByRole("button", { name: "Update password" }).click();
+  await expect(page.locator("#passwordResult")).toContainText(/Password changed/i);
 });

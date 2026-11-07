@@ -4,11 +4,12 @@ Use this checklist for each release. Mark a task complete only when evidence is 
 
 ## P0 — required before production exposure
 
-- [ ] Replace shared operator bearer-token authentication with managed per-user identity and tested role-based authorization.
-- [ ] Verify authorization on every protected endpoint, including read, create, update, delete, export and operational actions.
-- [ ] Add rate limiting, session/token expiry, revocation, secret rotation and security audit events.
+- [x] Implement named operator/admin accounts, password hashing, one-time first-admin bootstrap, expiring sessions, account/session revocation, and administrator-only user/device/driver credential management.
+- [x] Test admin/operator boundaries, invalid/expired/revoked sessions, bootstrap one-time behavior, and last-admin protection.
+- [x] Add session expiry, account lockout and security audit events.
+- [ ] Add ingress-level distributed rate limiting, MFA/SSO where required, and a formal authorization review across all routes.
 - [ ] Deploy behind HTTPS/TLS with a production domain, private database networking, secure headers and explicit CORS origins.
-- [ ] Store secrets in a managed secret store; verify no credentials are present in repository history, build logs or client bundles.
+- [ ] Store bootstrap/database/device secrets in a managed secret store; verify no credentials are present in repository history, build logs or client bundles.
 - [ ] Configure automated encrypted backups, retention, access controls, and complete a restore drill with recorded RPO/RTO.
 - [ ] Configure logs, metrics, uptime checks, alert routing, incident ownership and runbooks.
 - [ ] Replace public demo OSRM with a contracted or self-hosted provider and verify outage handling.

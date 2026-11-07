@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import csv
 import io
 from pathlib import Path
@@ -15,18 +15,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from .auth import hash_password, verify_password, hash_session_token
 from .config import settings
 from .db import Base, engine, get_db
-from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device, Driver
-from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate, DriverCreate, DriverTransition
+from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device, Driver, OperatorUser, OperatorSession, OperatorAuditEvent, OperatorBootstrap
+from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate, DriverCreate, DriverTransition, AuthBootstrap, AuthLogin, OperatorUserCreate, AuthPasswordChange
 from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 from .priority import calculate_priority
 
-app = FastAPI(title="Smart Waste Operations API", version="1.1.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
+app = FastAPI(title="Smart Waste Operations API", version="1.2.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
 if settings.auto_create_schema:
     Base.metadata.create_all(bind=engine)
-app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'DELETE', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Device-Token', 'X-Driver-Id', 'X-Driver-Token'])
+app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'DELETE', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Bootstrap-Token', 'X-Device-Token', 'X-Driver-Id', 'X-Driver-Token'])
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
@@ -109,12 +110,175 @@ def _release_vehicle_if_idle(db: Session, vehicle_id: str | None):
     if active_job is None:
         vehicle.available = True
 
-def require_operator(authorization: str | None = Header(default=None)):
+def _audit(db: Session, actor_user_id: str | None, action: str, subject: str = ""):
+    db.add(OperatorAuditEvent(actor_user_id=actor_user_id, action=action, subject=subject[:128]))
+
+
+def get_current_operator(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Operator sign-in required")
+    raw_token = authorization[7:].strip()
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Operator sign-in required")
+    configured = settings.api_token
+    placeholder = configured.strip() != configured or not configured.strip() or any(character.isspace() for character in configured) or configured.lower().startswith(("change-me", "replace-with"))
+    # Shared bootstrap token remains available only for local development and tests.
+    if settings.app_env.strip().lower() != "production" and not placeholder and compare_digest(raw_token, configured):
+        return {"user_id": None, "username": "local-bootstrap", "role": "admin", "session_id": None}
+    session = db.scalar(select(OperatorSession).where(OperatorSession.token_hash == hash_session_token(raw_token)))
+    now = datetime.now(timezone.utc)
+    if not session or session.revoked_at is not None or _utc(session.expires_at) <= now:
+        raise HTTPException(status_code=401, detail="Operator session is invalid or expired")
+    user = db.get(OperatorUser, session.operator_user_id)
+    if not user or not user.active:
+        raise HTTPException(status_code=401, detail="Operator account is inactive")
+    return {"user_id": user.id, "username": user.username, "role": user.role, "session_id": session.id}
+
+
+def require_operator(principal: dict = Depends(get_current_operator)):
+    if principal["role"] not in {"operator", "admin"}:
+        raise HTTPException(status_code=403, detail="Operator role required")
+    return principal
+
+
+def require_admin(principal: dict = Depends(require_operator)):
+    if principal["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Administrator role required")
+    return principal
+
+
+_DUMMY_PASSWORD_HASH = "pbkdf2_sha256$600000$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+
+@app.post("/api/v1/auth/bootstrap", status_code=201)
+def bootstrap_admin(payload: AuthBootstrap, x_bootstrap_token: str | None = Header(default=None), db: Session = Depends(get_db)):
     token = settings.api_token
-    expected = "Bearer " + token
-    placeholder = token.strip() != token or not token.strip() or any(character.isspace() for character in token) or token.lower().startswith(("change-me", "replace-with"))
-    if not authorization or placeholder or not compare_digest(authorization, expected):
-        raise HTTPException(status_code=401, detail="Valid configured operator bearer token required")
+    placeholder = token.strip() != token or len(token) < 32 or token.lower().startswith(("change-me", "replace-with")) or any(character.isspace() for character in token)
+    if placeholder or not x_bootstrap_token or not compare_digest(x_bootstrap_token, token):
+        raise HTTPException(status_code=401, detail="Valid bootstrap credential required")
+    if db.get(OperatorBootstrap, "initial_admin") or db.scalar(select(OperatorUser.id).limit(1)):
+        raise HTTPException(status_code=409, detail="Initial administrator has already been created")
+    user = OperatorUser(id=str(uuid4()), username=payload.username, password_hash=hash_password(payload.password), role="admin")
+    db.add(user)
+    db.add(OperatorBootstrap(id="initial_admin"))
+    db.flush()
+    _audit(db, user.id, "bootstrap_admin_created", user.username)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Initial administrator has already been created") from exc
+    return {"id": user.id, "username": user.username, "role": user.role, "active": user.active}
+
+
+@app.post("/api/v1/auth/login")
+def operator_login(payload: AuthLogin, db: Session = Depends(get_db)):
+    user = db.scalar(select(OperatorUser).where(OperatorUser.username == payload.username))
+    if user is None:
+        verify_password(payload.password, _DUMMY_PASSWORD_HASH)
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    now = datetime.now(timezone.utc)
+    if user.locked_until and _utc(user.locked_until) > now:
+        verify_password(payload.password, user.password_hash)
+        raise HTTPException(status_code=423, detail="Account temporarily locked after repeated failed sign-in attempts")
+    password_valid = verify_password(payload.password, user.password_hash)
+    if not user.active or not password_valid:
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= 8:
+            user.locked_until = now + timedelta(minutes=15)
+            user.failed_login_attempts = 0
+        _audit(db, user.id, "login_failed", user.username)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    user.last_login_at = now
+    raw_token = token_urlsafe(48)
+    session = OperatorSession(id=str(uuid4()), operator_user_id=user.id, token_hash=hash_session_token(raw_token), expires_at=now + timedelta(hours=8))
+    db.add(session)
+    _audit(db, user.id, "login_succeeded", user.username)
+    db.commit()
+    return {"access_token": raw_token, "token_type": "bearer", "expires_at": session.expires_at, "user": {"id": user.id, "username": user.username, "role": user.role}}
+
+
+@app.get("/api/v1/auth/me", dependencies=[Depends(require_operator)])
+def operator_identity(principal: dict = Depends(get_current_operator)):
+    return {"id": principal["user_id"], "username": principal["username"], "role": principal["role"]}
+
+
+@app.post("/api/v1/auth/logout", dependencies=[Depends(require_operator)])
+def operator_logout(principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
+    if principal["session_id"]:
+        session = db.get(OperatorSession, principal["session_id"])
+        if session and session.revoked_at is None:
+            session.revoked_at = datetime.now(timezone.utc)
+            _audit(db, principal["user_id"], "logout", principal["username"])
+            db.commit()
+    return {"logged_out": True}
+
+
+@app.post("/api/v1/auth/change-password", dependencies=[Depends(require_operator)])
+def change_operator_password(payload: AuthPasswordChange, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
+    user = db.get(OperatorUser, principal["user_id"])
+    if not user or not user.active or not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=422, detail="New password must differ from the current password")
+    user.password_hash = hash_password(payload.new_password)
+    now = datetime.now(timezone.utc)
+    for session in db.scalars(select(OperatorSession).where(OperatorSession.operator_user_id == user.id, OperatorSession.revoked_at.is_(None))):
+        if session.id != principal["session_id"]:
+            session.revoked_at = now
+    _audit(db, user.id, "password_changed", user.username)
+    db.commit()
+    return {"password_changed": True, "other_sessions_revoked": True}
+
+
+@app.get("/api/v1/auth/users", dependencies=[Depends(require_admin)])
+def list_operator_users(db: Session = Depends(get_db)):
+    users = db.scalars(select(OperatorUser).order_by(OperatorUser.username))
+    return [{"id": user.id, "username": user.username, "role": user.role, "active": user.active, "last_login_at": user.last_login_at, "created_at": user.created_at} for user in users]
+
+
+@app.post("/api/v1/auth/users", status_code=201, dependencies=[Depends(require_admin)])
+def create_operator_user(payload: OperatorUserCreate, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
+    if db.scalar(select(OperatorUser.id).where(OperatorUser.username == payload.username)):
+        raise HTTPException(status_code=409, detail="Username already exists")
+    user = OperatorUser(id=str(uuid4()), username=payload.username, password_hash=hash_password(payload.password), role=payload.role)
+    db.add(user)
+    try:
+        db.flush()
+        _audit(db, principal["user_id"], "operator_user_created", user.username)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Username already exists") from exc
+    return {"id": user.id, "username": user.username, "role": user.role, "active": user.active}
+
+
+@app.post("/api/v1/auth/users/{username}/revoke", dependencies=[Depends(require_admin)])
+def revoke_operator_user(username: str, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
+    user = db.scalar(select(OperatorUser).where(OperatorUser.username == username))
+    if not user:
+        raise HTTPException(status_code=404, detail="Unknown operator account")
+    if user.active and user.role == "admin":
+        active_admins = int(db.scalar(select(func.count()).select_from(OperatorUser).where(OperatorUser.active.is_(True), OperatorUser.role == "admin")) or 0)
+        if active_admins <= 1:
+            raise HTTPException(status_code=409, detail="Cannot revoke the last active administrator")
+    user.active = False
+    now = datetime.now(timezone.utc)
+    for session in db.scalars(select(OperatorSession).where(OperatorSession.operator_user_id == user.id, OperatorSession.revoked_at.is_(None))):
+        session.revoked_at = now
+    _audit(db, principal["user_id"], "operator_user_revoked", user.username)
+    db.commit()
+    return {"username": user.username, "active": False, "sessions_revoked": True}
+
+
+
+@app.get("/api/v1/auth/audit", dependencies=[Depends(require_admin)])
+def list_operator_audit(limit: int = 100, db: Session = Depends(get_db)):
+    rows = db.scalars(select(OperatorAuditEvent).order_by(OperatorAuditEvent.created_at.desc()).limit(max(1, min(limit, 500))))
+    return [{"id": row.id, "actor_user_id": row.actor_user_id, "action": row.action, "subject": row.subject, "created_at": row.created_at} for row in rows]
 
 @app.get("/health")
 def health():
@@ -142,7 +306,7 @@ def create_bin(payload: BinCreate, db: Session = Depends(get_db)):
 def list_bins(db: Session = Depends(get_db)):
     return list(db.scalars(select(Bin).where(Bin.active.is_(True)).order_by(Bin.id)))
 
-@app.post("/api/v1/devices", dependencies=[Depends(require_operator)], status_code=201)
+@app.post("/api/v1/devices", dependencies=[Depends(require_admin)], status_code=201)
 def register_device(payload: DeviceCreate, db: Session = Depends(get_db)):
     if not db.get(Bin, payload.bin_id):
         raise HTTPException(404, "Unknown bin")
@@ -154,12 +318,12 @@ def register_device(payload: DeviceCreate, db: Session = Depends(get_db)):
     db.commit()
     return {"id": device.id, "bin_id": device.bin_id, "active": device.active, "token": raw_token, "token_notice": "Store this token securely; it will not be shown again."}
 
-@app.get("/api/v1/devices", dependencies=[Depends(require_operator)])
+@app.get("/api/v1/devices", dependencies=[Depends(require_admin)])
 def list_devices(db: Session = Depends(get_db)):
     rows = db.scalars(select(Device).order_by(Device.id))
     return [{"id": d.id, "bin_id": d.bin_id, "active": d.active, "last_seen_at": d.last_seen_at, "created_at": d.created_at} for d in rows]
 
-@app.post("/api/v1/devices/{device_id}/rotate-token", dependencies=[Depends(require_operator)])
+@app.post("/api/v1/devices/{device_id}/rotate-token", dependencies=[Depends(require_admin)])
 def rotate_device_token(device_id: str, db: Session = Depends(get_db)):
     device = db.get(Device, device_id)
     if not device:
@@ -170,7 +334,7 @@ def rotate_device_token(device_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"id": device.id, "token": raw_token, "token_notice": "Store this token securely; the previous token is now invalid."}
 
-@app.delete("/api/v1/devices/{device_id}", dependencies=[Depends(require_operator)])
+@app.delete("/api/v1/devices/{device_id}", dependencies=[Depends(require_admin)])
 def revoke_device(device_id: str, db: Session = Depends(get_db)):
     device = db.get(Device, device_id)
     if not device:
@@ -349,7 +513,7 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
                 f"Bin {payload.bin_id} already has an open collection job ({open_job_id}); verify or resolve it before creating another",
             ) from exc
         raise HTTPException(409, "Collection job conflicted with another database write; refresh and retry") from exc
-    return {"id": job.id, "bin_id": job.bin_id, "status": job.status, "demand_liters": job.demand_liters, "priority": job.priority, "priority_method": "weighted heuristic", "demand_source": demand_source}
+    return {"id": job.id, "bin_id": job.bin_id, "status": job.status, "demand_liters": job.demand_liters, "priority": job.priority, "priority_method": "zero-order Sugeno fuzzy inference", "demand_source": demand_source}
 
 ALLOWED = {
     "detected": {"approved", "exception"},
@@ -433,7 +597,7 @@ def list_vehicles(db: Session = Depends(get_db)):
     return [{"id": v.id, "capacity_liters": v.capacity_liters, "active": v.active, "available": v.available, "depot_latitude": v.depot_latitude, "depot_longitude": v.depot_longitude} for v in rows]
 
 @app.post("/api/v1/jobs/{job_id}/assign", dependencies=[Depends(require_operator)])
-def assign_job(job_id: str, payload: JobAssign, db: Session = Depends(get_db)):
+def assign_job(job_id: str, payload: JobAssign, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
     vehicle = db.scalar(select(Vehicle).where(Vehicle.id == payload.vehicle_id).with_for_update())
     if not job:
@@ -452,12 +616,12 @@ def assign_job(job_id: str, payload: JobAssign, db: Session = Depends(get_db)):
     job.status = "assigned"
     job.assigned_vehicle_id = vehicle.id
     vehicle.available = False
-    db.add(ServiceEvent(job_id=job.id, actor=payload.actor, previous_status=previous, new_status="assigned", note="Assigned to vehicle " + vehicle.id))
+    db.add(ServiceEvent(job_id=job.id, actor=principal["username"], previous_status=previous, new_status="assigned", note="Assigned to vehicle " + vehicle.id))
     db.commit()
     return {"id": job.id, "status": job.status, "assigned_vehicle_id": job.assigned_vehicle_id}
 
 @app.post("/api/v1/jobs/{job_id}/transitions", dependencies=[Depends(require_operator)])
-def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get_db)):
+def transition_job(job_id: str, payload: TransitionIn, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
     if not job:
         raise HTTPException(404, "Unknown job")
@@ -479,7 +643,7 @@ def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get
     elif payload.status == "approved" and previous in {"assigned", "exception"}:
         job.assigned_vehicle_id = None
         _release_vehicle_if_idle(db, previous_vehicle_id)
-    db.add(ServiceEvent(job_id=job.id, actor=payload.actor, previous_status=previous, new_status=payload.status, note=payload.note))
+    db.add(ServiceEvent(job_id=job.id, actor=principal["username"], previous_status=previous, new_status=payload.status, note=payload.note))
     db.commit()
     return {"id": job.id, "previous_status": previous, "status": job.status}
 
@@ -532,7 +696,7 @@ def _driver_auth(driver_id: str | None, token: str | None, db: Session) -> Drive
     driver.last_seen_at = datetime.now(timezone.utc)
     return driver
 
-@app.post("/api/v1/drivers", dependencies=[Depends(require_operator)], status_code=201)
+@app.post("/api/v1/drivers", dependencies=[Depends(require_admin)], status_code=201)
 def register_driver(payload: DriverCreate, db: Session = Depends(get_db)):
     if db.get(Driver, payload.id):
         raise HTTPException(409, "Driver already exists")
@@ -545,12 +709,12 @@ def register_driver(payload: DriverCreate, db: Session = Depends(get_db)):
     db.commit()
     return {"id": driver.id, "vehicle_id": driver.vehicle_id, "token": raw_token, "token_notice": "Store this token securely; it will not be shown again."}
 
-@app.get("/api/v1/drivers", dependencies=[Depends(require_operator)])
+@app.get("/api/v1/drivers", dependencies=[Depends(require_admin)])
 def list_drivers(db: Session = Depends(get_db)):
     rows = db.scalars(select(Driver).order_by(Driver.id))
     return [{"id": d.id, "vehicle_id": d.vehicle_id, "active": d.active, "last_seen_at": d.last_seen_at} for d in rows]
 
-@app.post("/api/v1/drivers/{driver_id}/rotate-token", dependencies=[Depends(require_operator)])
+@app.post("/api/v1/drivers/{driver_id}/rotate-token", dependencies=[Depends(require_admin)])
 def rotate_driver_token(driver_id: str, db: Session = Depends(get_db)):
     driver = db.get(Driver, driver_id)
     if not driver:
@@ -561,7 +725,7 @@ def rotate_driver_token(driver_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"id": driver.id, "token": raw_token, "token_notice": "Store this token securely; the previous token is now invalid."}
 
-@app.delete("/api/v1/drivers/{driver_id}", dependencies=[Depends(require_operator)])
+@app.delete("/api/v1/drivers/{driver_id}", dependencies=[Depends(require_admin)])
 def revoke_driver(driver_id: str, db: Session = Depends(get_db)):
     driver = db.get(Driver, driver_id)
     if not driver:
@@ -605,7 +769,7 @@ def driver_transition(job_id: str, payload: DriverTransition, x_driver_id: str |
     return {"id": job.id, "previous_status": previous, "status": job.status}
 
 @app.post("/api/v1/routes/dispatch", dependencies=[Depends(require_operator)])
-async def dispatch_approved_jobs(payload: DispatchRequest, db: Session = Depends(get_db)):
+async def dispatch_approved_jobs(payload: DispatchRequest, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
     """Optimize approved jobs against registered vehicle capacities and atomically assign route stops."""
     jobs = []
     bins = []
@@ -662,7 +826,7 @@ async def dispatch_approved_jobs(payload: DispatchRequest, db: Session = Depends
                 job.status = "assigned"
                 job.assigned_vehicle_id = vehicle.id
                 assigned_job_ids.add(job.id)
-                db.add(ServiceEvent(job_id=job.id, actor="dispatcher", previous_status=previous, new_status="assigned", note=f"Assigned by route plan to vehicle {vehicle.id}"))
+                db.add(ServiceEvent(job_id=job.id, actor=principal["username"], previous_status=previous, new_status="assigned", note=f"Assigned by route plan to vehicle {vehicle.id}"))
                 route_jobs.append({"job_id": job.id, "bin_id": job.bin_id, "sequence": len(route_jobs) + 1, "demand_liters": job.demand_liters})
             route_details.append({**route, "vehicle_id": vehicle.id, "ordered_bin_ids": [bins[i - 1].id for i in route["stop_indices"]], "jobs": route_jobs, "road_distance_meters": geometry["distance_meters"], "road_duration_seconds": geometry["duration_seconds"], "geometry": geometry["geometry"]})
         if assigned_job_ids != {job.id for job in jobs}:

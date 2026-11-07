@@ -187,7 +187,7 @@ def test_job_priority_is_computed_from_fresh_fill_and_bin_criticality():
     job = client.post("/api/v1/jobs", json={"bin_id":"bin-priority"}, headers=OP)
     assert job.status_code == 201
     assert 0 <= job.json()["priority"] <= 100
-    assert job.json()["priority_method"] == "weighted heuristic"
+    assert job.json()["priority_method"] == "zero-order Sugeno fuzzy inference"
     assert job.json()["demand_liters"] == 900
 
 def test_device_credentials_are_scoped_revocable_and_rotatable():

@@ -91,3 +91,24 @@ class DriverCreate(BaseModel):
 class DriverTransition(BaseModel):
     status: str = Field(pattern="^(in_progress|completed|exception)$")
     note: str | None = Field(default=None, max_length=1000)
+
+
+class AuthBootstrap(BaseModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r'^[A-Za-z0-9._-]+$')
+    password: str = Field(min_length=12, max_length=128)
+
+
+class AuthLogin(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class OperatorUserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r'^[A-Za-z0-9._-]+$')
+    password: str = Field(min_length=12, max_length=128)
+    role: str = Field(default='operator', pattern='^(operator|admin)$')
+
+
+class AuthPasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)

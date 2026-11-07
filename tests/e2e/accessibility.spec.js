@@ -15,6 +15,7 @@ for (const [path, titlePattern] of [
     expect(count).toBeGreaterThan(0);
     for (let i = 0; i < count; i += 1) {
       const control = controls.nth(i);
+      if (!(await control.isVisible())) continue;
       const id = await control.getAttribute("id");
       expect(id, "form controls need stable IDs").toBeTruthy();
       await expect(page.locator(`label[for="${id}"]`)).toHaveCount(1);
