@@ -128,6 +128,7 @@ Train the optional model artifact from the repository root with `python person2_
 | `GET` | `/api/v1/auth/audit` | Inspect security audit events (admin only) |
 | `POST` | `/api/v1/bins` | Register a bin |
 | `GET` | `/api/v1/bins` | List active bins |
+| `GET` | `/api/v1/bins/nearby` | Find active bins within a radius using PostGIS geography and a GiST index |
 | `POST` | `/api/v1/devices` | Enroll a device and issue its one-time token |
 | `GET` | `/api/v1/devices` | List device status without revealing tokens |
 | `POST` | `/api/v1/devices/{device_id}/rotate-token` | Rotate a device credential |
