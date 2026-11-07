@@ -12,7 +12,7 @@ def upgrade():
     op.create_table(
         'driver_actions',
         sa.Column('idempotency_key', sa.String(length=128), primary_key=True),
-        sa.Column('driver_id', sa.String(length=100), sa.ForeignKey('drivers.id'), nullable=False),
+        sa.Column('driver_id', sa.String(length=80), sa.ForeignKey('drivers.id'), nullable=False),
         sa.Column('job_id', sa.String(length=80), sa.ForeignKey('collection_jobs.id'), nullable=False),
         sa.Column('action', sa.String(length=30), nullable=False),
         sa.Column('request_hash', sa.String(length=64), nullable=False),
