@@ -44,7 +44,7 @@ A full-stack waste-operations engineering prototype combining IoT telemetry, col
 - **Operator console:** responsive map-based bin monitoring, telemetry summary, vehicle/job controls, route preview/dispatch, optional model forecasts, and named-account sign-in with expiring sessions.
 - **Operator identity:** one-time initial-admin bootstrap, named admin/operator accounts, password hashing, session expiry/revocation, account lockout, password changes and security audit events.
 - **Driver workflow:** vehicle-scoped assigned stops, collection status changes, exception reporting, and external navigation handoff.
-- **ML demonstration:** feature engineering, Random Forest inference, chronological holdout evaluation and simple baselines. Forecast scope is deliberately limited to the next observed fill value.
+- **ML demonstration:** time-aware feature engineering, Random Forest inference, cadence-checked chronological holdout evaluation and simple baselines. Forecast scope is deliberately limited to the next observed fill value; cadence-mismatched history and legacy feature-schema artifacts are rejected.
 - **Engineering quality:** SQLAlchemy persistence, Alembic migrations, Docker Compose, API readiness checks, Python CI, CodeQL, and browser-driven operator/driver smoke tests.
 
 ## Architecture
@@ -177,7 +177,7 @@ The web container reverse-proxies `/api/*` and health/API documentation routes t
 - Production startup rejects SQLite, weak/placeholder bootstrap secrets, automatic schema creation, demo seeding, unsafe CORS settings, and the public demo OSRM router.
 - Named operator/admin accounts use salted PBKDF2 password hashes, eight-hour HttpOnly/SameSite=Strict browser cookies (Secure in production), opaque session hashes, account lockout, account/session revocation, password-change session rotation, and audit events. Cookie-authenticated state changes validate the request Origin; browser credentials are never exposed to JavaScript storage. The shared API_TOKEN is a one-time bootstrap secret in production and remains a local-development compatibility credential only.
 - Nginx adds browser security headers and a Content Security Policy. Operator and driver JavaScript is served from same-origin files, so `script-src` does not allow `unsafe-inline`. Inline styles still require `unsafe-inline` and remain a hardening opportunity.
-- Application-level admin/operator roles are implemented, but external SSO/OAuth, MFA, ingress-level distributed rate limiting, and a formal penetration test remain outstanding.
+- Application-level admin/operator roles are implemented, but external SSO/OAuth, MFA, distributed ingress rate limiting beyond the included Nginx per-IP login/bootstrap limit, and a formal penetration test remain outstanding.
 - Use a contracted or self-hosted routing service for deployment. The public OSRM demo service is for development only.
 - Before public exposure, configure managed secrets, HTTPS/TLS, private database networking, rate limits, logs/alerts, automated encrypted backups and a tested restore procedure.
 - Follow the [production operations runbook](docs/PRODUCTION_RUNBOOK.md) and [release acceptance checklist](docs/RELEASE_CHECKLIST.md). Do not mark unchecked acceptance gates complete without evidence.
