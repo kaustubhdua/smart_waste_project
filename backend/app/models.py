@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Float, DateTime, ForeignKey, UniqueConstraint, Integer, Text, Boolean, Index
+from sqlalchemy import String, Float, DateTime, ForeignKey, UniqueConstraint, Integer, Text, Boolean, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
@@ -45,6 +45,18 @@ class Vehicle(Base):
 
 class CollectionJob(Base):
     __tablename__ = "collection_jobs"
+    # A preflight API check improves the error message, but only a database
+    # constraint can prevent two concurrent requests from opening jobs for
+    # the same bin. Verified jobs are historical and do not block new work.
+    __table_args__ = (
+        Index(
+            "uq_collection_jobs_one_open_per_bin",
+            "bin_id",
+            unique=True,
+            sqlite_where=text("status != 'verified'"),
+            postgresql_where=text("status != 'verified'"),
+        ),
+    )
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     bin_id: Mapped[str] = mapped_column(ForeignKey("bins.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="detected", index=True)

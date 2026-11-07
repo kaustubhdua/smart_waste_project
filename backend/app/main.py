@@ -330,7 +330,24 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
     job = CollectionJob(id=str(uuid4()), bin_id=payload.bin_id, demand_liters=demand, priority=priority)
     db.add(job)
     db.add(ServiceEvent(job_id=job.id, actor="system", previous_status="none", new_status="detected", note="Collection candidate created"))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        # The partial unique index is the final concurrency guard. A second
+        # request may pass the preflight query before the first one commits.
+        db.rollback()
+        open_job_id = db.scalar(
+            select(CollectionJob.id).where(
+                CollectionJob.bin_id == payload.bin_id,
+                CollectionJob.status != "verified",
+            ).limit(1)
+        )
+        if open_job_id is not None:
+            raise HTTPException(
+                409,
+                f"Bin {payload.bin_id} already has an open collection job ({open_job_id}); verify or resolve it before creating another",
+            ) from exc
+        raise HTTPException(409, "Collection job conflicted with another database write; refresh and retry") from exc
     return {"id": job.id, "bin_id": job.bin_id, "status": job.status, "demand_liters": job.demand_liters, "priority": job.priority, "priority_method": "weighted heuristic", "demand_source": demand_source}
 
 ALLOWED = {

@@ -1,4 +1,5 @@
 import os
+import pytest
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
@@ -6,7 +7,9 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_smart_waste.db"
 os.environ["API_TOKEN"] = "test-operator-token"
 
 from app.main import app
-from app.db import Base, engine
+from app.db import Base, engine, SessionLocal
+from app.models import CollectionJob
+from sqlalchemy.exc import IntegrityError
 
 client = TestClient(app)
 OP = {"Authorization": "Bearer test-operator-token"}
@@ -476,3 +479,43 @@ def test_bin_criticality_must_be_explicit():
     payload = {"id": "bin-no-criticality", "latitude": 28.6, "longitude": 77.2, "capacity_liters": 1000, "source": "live"}
     response = client.post("/api/v1/bins", json=payload, headers=OP)
     assert response.status_code == 422
+
+
+
+def test_database_rejects_a_second_open_job_even_when_preflight_is_bypassed():
+    bin_payload = {
+        "id": "bin-open-job-index",
+        "latitude": 28.6,
+        "longitude": 77.2,
+        "capacity_liters": 500,
+        "criticality": 3,
+        "source": "demo",
+    }
+    assert client.post("/api/v1/bins", json=bin_payload, headers=OP).status_code == 201
+    first = client.post(
+        "/api/v1/jobs",
+        json={"bin_id": "bin-open-job-index", "demand_liters": 50},
+        headers=OP,
+    )
+    assert first.status_code == 201
+
+    # Simulate a concurrent writer that reaches the database after another
+    # request has already passed the API's friendly preflight check.
+    db = SessionLocal()
+    try:
+        db.add(
+            CollectionJob(
+                id="concurrent-open-job",
+                bin_id="bin-open-job-index",
+                status="detected",
+                demand_liters=25,
+                priority=10,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+    finally:
+        db.close()
+
+    assert len(client.get("/api/v1/jobs", headers=OP).json()) == 1
