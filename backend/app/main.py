@@ -119,10 +119,10 @@ def get_current_operator(
     wasteops_session: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ):
-    raw_token = wasteops_session or (
+    raw_token = (
         authorization[7:].strip()
         if authorization and authorization.startswith("Bearer ")
-        else ""
+        else (wasteops_session or "")
     )
     if not raw_token:
         raise HTTPException(status_code=401, detail="Operator sign-in required")
