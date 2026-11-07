@@ -63,7 +63,7 @@ def test_login_session_identity_logout_and_revocation(monkeypatch):
     bootstrap(monkeypatch)
     response = login()
     assert response.status_code == 200, response.text
-    token = response.json()["access_token"]
+    token = response.cookies.get("wasteops_session")
     assert response.json()["user"]["role"] == "admin"
     headers = {"Authorization": "Bearer " + token}
     assert client.get("/api/v1/auth/me", headers=headers).json()["username"] == "rootadmin"
@@ -74,7 +74,7 @@ def test_login_session_identity_logout_and_revocation(monkeypatch):
 
 def test_admin_can_create_operator_but_operator_cannot_manage_users(monkeypatch):
     bootstrap(monkeypatch)
-    admin_token = login().json()["access_token"]
+    admin_token = login().cookies.get("wasteops_session")
     admin_headers = {"Authorization": "Bearer " + admin_token}
     created = client.post(
         "/api/v1/auth/users",
@@ -82,7 +82,7 @@ def test_admin_can_create_operator_but_operator_cannot_manage_users(monkeypatch)
         json={"username": "dispatcher1", "password": "dispatcher-password-123", "role": "operator"},
     )
     assert created.status_code == 201, created.text
-    operator_token = login("dispatcher1", "dispatcher-password-123").json()["access_token"]
+    operator_token = login("dispatcher1", "dispatcher-password-123").cookies.get("wasteops_session")
     operator_headers = {"Authorization": "Bearer " + operator_token}
     assert client.get("/api/v1/bins", headers=operator_headers).status_code == 200
     assert client.get("/api/v1/auth/users", headers=operator_headers).status_code == 403
@@ -96,14 +96,14 @@ def test_admin_can_create_operator_but_operator_cannot_manage_users(monkeypatch)
 
 def test_admin_revocation_invalidates_all_existing_sessions(monkeypatch):
     bootstrap(monkeypatch)
-    admin_token = login().json()["access_token"]
+    admin_token = login().cookies.get("wasteops_session")
     admin_headers = {"Authorization": "Bearer " + admin_token}
     client.post(
         "/api/v1/auth/users",
         headers=admin_headers,
         json={"username": "dispatcher2", "password": "dispatcher-password-456", "role": "operator"},
     )
-    operator_token = login("dispatcher2", "dispatcher-password-456").json()["access_token"]
+    operator_token = login("dispatcher2", "dispatcher-password-456").cookies.get("wasteops_session")
     revoked = client.post("/api/v1/auth/users/dispatcher2/revoke", headers=admin_headers)
     assert revoked.status_code == 200
     assert client.get("/api/v1/bins", headers={"Authorization": "Bearer " + operator_token}).status_code == 401
@@ -111,7 +111,7 @@ def test_admin_revocation_invalidates_all_existing_sessions(monkeypatch):
 
 def test_last_active_administrator_cannot_be_revoked(monkeypatch):
     bootstrap(monkeypatch)
-    token = login().json()["access_token"]
+    token = login().cookies.get("wasteops_session")
     response = client.post(
         "/api/v1/auth/users/rootadmin/revoke",
         headers={"Authorization": "Bearer " + token},
@@ -121,7 +121,7 @@ def test_last_active_administrator_cannot_be_revoked(monkeypatch):
 
 def test_expired_sessions_are_rejected(monkeypatch):
     bootstrap(monkeypatch)
-    token = login().json()["access_token"]
+    token = login().cookies.get("wasteops_session")
     with SessionLocal() as db:
         session = db.query(OperatorSession).one()
         session.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
@@ -139,10 +139,10 @@ def test_shared_api_token_is_not_accepted_as_production_operator_credential(monk
     assert response.status_code == 401
 
 
-def test_password_change_revokes_other_sessions_and_preserves_current_session(monkeypatch):
+def test_password_change_rotates_current_session_and_revokes_all_previous_sessions(monkeypatch):
     bootstrap(monkeypatch)
-    first_token = login().json()["access_token"]
-    second_token = login().json()["access_token"]
+    first_token = login().cookies.get("wasteops_session")
+    second_token = login().cookies.get("wasteops_session")
     first_headers = {"Authorization": "Bearer " + first_token}
     changed = client.post(
         "/api/v1/auth/change-password",
@@ -153,7 +153,10 @@ def test_password_change_revokes_other_sessions_and_preserves_current_session(mo
         },
     )
     assert changed.status_code == 200, changed.text
-    assert client.get("/api/v1/bins", headers=first_headers).status_code == 200
+    renewed_token = changed.cookies.get("wasteops_session")
+    assert renewed_token
+    assert client.get("/api/v1/bins", headers={"Authorization": "Bearer " + renewed_token}).status_code == 200
+    assert client.get("/api/v1/bins", headers=first_headers).status_code == 401
     assert client.get("/api/v1/bins", headers={"Authorization": "Bearer " + second_token}).status_code == 401
     assert login("rootadmin", "correct-horse-battery-staple").status_code == 401
     assert login("rootadmin", "new-correct-horse-battery-staple").status_code == 200
@@ -170,7 +173,7 @@ def test_repeated_failed_password_attempts_lock_account(monkeypatch):
 
 def test_operator_cannot_enroll_or_rotate_device_credentials(monkeypatch):
     bootstrap(monkeypatch)
-    admin_token = login().json()["access_token"]
+    admin_token = login().cookies.get("wasteops_session")
     admin_headers = {"Authorization": "Bearer " + admin_token}
     bin_payload = {
         "id": "bin-authz",
@@ -186,7 +189,7 @@ def test_operator_cannot_enroll_or_rotate_device_credentials(monkeypatch):
         headers=admin_headers,
         json={"username": "fieldops", "password": "field-operator-password", "role": "operator"},
     )
-    operator_token = login("fieldops", "field-operator-password").json()["access_token"]
+    operator_token = login("fieldops", "field-operator-password").cookies.get("wasteops_session")
     operator_headers = {"Authorization": "Bearer " + operator_token}
     forbidden = client.post(
         "/api/v1/devices",
@@ -208,7 +211,7 @@ def test_operator_cannot_enroll_or_rotate_device_credentials(monkeypatch):
 
 def test_service_event_actor_comes_from_authenticated_session_not_request_body(monkeypatch):
     bootstrap(monkeypatch)
-    token = login().json()["access_token"]
+    token = login().cookies.get("wasteops_session")
     headers = {"Authorization": "Bearer " + token}
     bin_payload = {
         "id": "bin-audit-actor",
