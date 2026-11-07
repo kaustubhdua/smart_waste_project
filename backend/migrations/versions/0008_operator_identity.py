@@ -37,6 +37,11 @@ def upgrade():
     op.create_index('ix_operator_sessions_operator_user_id', 'operator_sessions', ['operator_user_id'])
     op.create_index('ix_operator_sessions_expires_at', 'operator_sessions', ['expires_at'])
     op.create_table(
+        'operator_bootstrap',
+        sa.Column('id', sa.String(length=40), primary_key=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    )
+    op.create_table(
         'operator_audit_events',
         sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column('actor_user_id', sa.String(length=80), sa.ForeignKey('operator_users.id'), nullable=True),
@@ -50,6 +55,7 @@ def upgrade():
 
 
 def downgrade():
+    op.drop_table('operator_bootstrap')
     op.drop_index('ix_operator_audit_events_created_at', table_name='operator_audit_events')
     op.drop_index('ix_operator_audit_events_action', table_name='operator_audit_events')
     op.drop_index('ix_operator_audit_events_actor_user_id', table_name='operator_audit_events')
