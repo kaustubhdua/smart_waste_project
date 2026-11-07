@@ -7,4 +7,4 @@ COPY security-headers.conf /etc/nginx/security-headers.conf
 COPY operator.js /usr/share/nginx/html/operator.js
 COPY driver.js /usr/share/nginx/html/driver.js
 
-COPY rate-limit.conf /etc/nginx/conf.d/rate-limit.conf
+COPY rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf
