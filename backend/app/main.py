@@ -776,9 +776,8 @@ def driver_transition(job_id: str, payload: DriverTransition, x_driver_id: str |
     previous = job.status
     job.status = payload.status
     if payload.status == "completed":
-        bin_row = db.get(Bin, job.bin_id)
-        if bin_row:
-            bin_row.last_emptied_at = datetime.now(timezone.utc)
+        # A driver completion is pending operator verification. Only the
+        # verified lifecycle transition updates the bin's emptying timestamp.
         _release_vehicle_if_idle(db, driver.vehicle_id)
     if payload.status == "exception":
         _release_vehicle_if_idle(db, driver.vehicle_id)
