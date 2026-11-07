@@ -137,3 +137,32 @@ def test_shared_api_token_is_not_accepted_as_production_operator_credential(monk
     monkeypatch.setattr(settings, "app_env", "production")
     response = client.get("/api/v1/bins", headers={"Authorization": "Bearer " + token})
     assert response.status_code == 401
+
+
+def test_password_change_revokes_other_sessions_and_preserves_current_session(monkeypatch):
+    bootstrap(monkeypatch)
+    first_token = login().json()["access_token"]
+    second_token = login().json()["access_token"]
+    first_headers = {"Authorization": "Bearer " + first_token}
+    changed = client.post(
+        "/api/v1/auth/change-password",
+        headers=first_headers,
+        json={
+            "current_password": "correct-horse-battery-staple",
+            "new_password": "new-correct-horse-battery-staple",
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    assert client.get("/api/v1/bins", headers=first_headers).status_code == 200
+    assert client.get("/api/v1/bins", headers={"Authorization": "Bearer " + second_token}).status_code == 401
+    assert login("rootadmin", "correct-horse-battery-staple").status_code == 401
+    assert login("rootadmin", "new-correct-horse-battery-staple").status_code == 200
+
+
+def test_repeated_failed_password_attempts_lock_account(monkeypatch):
+    bootstrap(monkeypatch)
+    for _ in range(7):
+        assert login("rootadmin", "incorrect-password").status_code == 401
+    locked = login("rootadmin", "incorrect-password")
+    assert locked.status_code == 423
+    assert login("rootadmin", "correct-horse-battery-staple").status_code == 423
