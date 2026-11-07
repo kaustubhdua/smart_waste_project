@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 import app.routing as routing
@@ -7,8 +9,11 @@ from app.routing import RoutingError
 COORDINATES = [(28.6, 77.2), (28.61, 77.21)]
 
 
-@pytest.mark.asyncio
-async def test_road_matrix_returns_validated_distance_and_duration_matrices(monkeypatch):
+def run(coroutine):
+    return asyncio.run(coroutine)
+
+
+def test_road_matrix_returns_validated_distance_and_duration_matrices(monkeypatch):
     async def fake_get(path, params):
         assert path == "table/v1/driving/77.2,28.6;77.21,28.61"
         assert params == {"annotations": "distance,duration"}
@@ -19,12 +24,11 @@ async def test_road_matrix_returns_validated_distance_and_duration_matrices(monk
         }
 
     monkeypatch.setattr(routing, "_get", fake_get)
-    result = await routing.road_matrix(COORDINATES)
+    result = run(routing.road_matrix(COORDINATES))
     assert result["distances_meters"] == [[0, 120.5], [120.5, 0]]
     assert result["durations_seconds"] == [[0, 35], [35, 0]]
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "distances,durations",
     [
@@ -35,7 +39,7 @@ async def test_road_matrix_returns_validated_distance_and_duration_matrices(monk
         ([[0, 1], [1, 0]], [[0, 1]]),
     ],
 )
-async def test_road_matrix_rejects_incomplete_or_invalid_provider_data(
+def test_road_matrix_rejects_incomplete_or_invalid_provider_data(
     monkeypatch, distances, durations
 ):
     async def fake_get(path, params):
@@ -43,11 +47,10 @@ async def test_road_matrix_rejects_incomplete_or_invalid_provider_data(
 
     monkeypatch.setattr(routing, "_get", fake_get)
     with pytest.raises(RoutingError):
-        await routing.road_matrix(COORDINATES)
+        run(routing.road_matrix(COORDINATES))
 
 
-@pytest.mark.asyncio
-async def test_get_rejects_non_object_provider_json(monkeypatch):
+def test_get_rejects_non_object_provider_json(monkeypatch):
     class Response:
         def raise_for_status(self):
             return None
@@ -70,11 +73,10 @@ async def test_get_rejects_non_object_provider_json(monkeypatch):
 
     monkeypatch.setattr(routing.httpx, "AsyncClient", Client)
     with pytest.raises(RoutingError, match="invalid response"):
-        await routing._get("table/v1/driving/example", {})
+        run(routing._get("table/v1/driving/example", {}))
 
 
-@pytest.mark.asyncio
-async def test_road_route_rejects_invalid_metrics_and_geometry(monkeypatch):
+def test_road_route_rejects_invalid_metrics(monkeypatch):
     async def fake_get(path, params):
         return {
             "code": "Ok",
@@ -87,11 +89,10 @@ async def test_road_route_rejects_invalid_metrics_and_geometry(monkeypatch):
 
     monkeypatch.setattr(routing, "_get", fake_get)
     with pytest.raises(RoutingError, match="invalid route metrics"):
-        await routing.road_route(COORDINATES)
+        run(routing.road_route(COORDINATES))
 
 
-@pytest.mark.asyncio
-async def test_road_route_returns_only_validated_geojson(monkeypatch):
+def test_road_route_returns_only_validated_geojson(monkeypatch):
     geometry = {
         "type": "LineString",
         "coordinates": [[77.2, 28.6], [77.21, 28.61]],
@@ -104,7 +105,7 @@ async def test_road_route_returns_only_validated_geojson(monkeypatch):
         }
 
     monkeypatch.setattr(routing, "_get", fake_get)
-    result = await routing.road_route(COORDINATES)
+    result = run(routing.road_route(COORDINATES))
     assert result == {
         "distance_meters": 120.5,
         "duration_seconds": 35,
@@ -112,8 +113,7 @@ async def test_road_route_returns_only_validated_geojson(monkeypatch):
     }
 
 
-@pytest.mark.asyncio
-async def test_road_route_rejects_out_of_range_geometry_coordinates(monkeypatch):
+def test_road_route_rejects_out_of_range_geometry_coordinates(monkeypatch):
     async def fake_get(path, params):
         return {
             "code": "Ok",
@@ -126,4 +126,20 @@ async def test_road_route_rejects_out_of_range_geometry_coordinates(monkeypatch)
 
     monkeypatch.setattr(routing, "_get", fake_get)
     with pytest.raises(RoutingError, match="invalid route coordinates"):
-        await routing.road_route(COORDINATES)
+        run(routing.road_route(COORDINATES))
+
+
+def test_road_route_rejects_boolean_geometry_coordinates(monkeypatch):
+    async def fake_get(path, params):
+        return {
+            "code": "Ok",
+            "routes": [{
+                "distance": 120,
+                "duration": 35,
+                "geometry": {"type": "LineString", "coordinates": [[True, 28.6], [77.2, 28.7]]},
+            }],
+        }
+
+    monkeypatch.setattr(routing, "_get", fake_get)
+    with pytest.raises(RoutingError, match="invalid route coordinates"):
+        run(routing.road_route(COORDINATES))
