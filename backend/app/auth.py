@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import secrets
 
-PASSWORD_ITERATIONS = 310_000
+PASSWORD_ITERATIONS = 600_000
 PASSWORD_SCHEME = 'pbkdf2_sha256'
 
 def _b64encode(value: bytes) -> str:
