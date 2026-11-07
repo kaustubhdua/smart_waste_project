@@ -147,7 +147,7 @@ def require_admin(principal: dict = Depends(require_operator)):
     return principal
 
 
-_DUMMY_PASSWORD_HASH = "pbkdf2_sha256$310000$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+_DUMMY_PASSWORD_HASH = "pbkdf2_sha256$600000$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 
 @app.post("/api/v1/auth/bootstrap", status_code=201)
