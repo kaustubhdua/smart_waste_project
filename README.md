@@ -44,7 +44,7 @@ A full-stack waste-operations engineering prototype combining IoT telemetry, col
 - **Operator console:** responsive map-based bin monitoring, telemetry summary, vehicle/job controls, route preview/dispatch, optional model forecasts, and named-account sign-in with expiring sessions.
 - **Operator identity:** one-time initial-admin bootstrap, named admin/operator accounts, password hashing, session expiry/revocation, account lockout, password changes and security audit events.
 - **Driver workflow:** vehicle-scoped assigned stops, collection status changes, exception reporting, and external navigation handoff.
-- **ML demonstration:** feature engineering, Random Forest inference, chronological holdout evaluation and simple baselines. Forecast scope is deliberately limited to the next observed fill value.
+- **ML demonstration:** time-aware feature engineering, Random Forest inference, cadence-checked chronological holdout evaluation and simple baselines. Forecast scope is deliberately limited to the next observed fill value; cadence-mismatched history and legacy feature-schema artifacts are rejected.
 - **Engineering quality:** SQLAlchemy persistence, Alembic migrations, Docker Compose, API readiness checks, Python CI, CodeQL, and browser-driven operator/driver smoke tests.
 
 ## Architecture

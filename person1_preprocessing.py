@@ -48,7 +48,7 @@ def generate_synthetic_bin_data(num_bins=20, days=30, seed=42):
 
 
 def preprocess_data(df):
-    """Clean sensor data and build features using only information available before prediction time."""
+    """Validate telemetry and build timestamp-aware, strictly historical features."""
     required = {
         "timestamp",
         "bin_id",
@@ -62,30 +62,67 @@ def preprocess_data(df):
     missing = required.difference(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
-
+    if df.empty:
+        raise ValueError("Dataset contains no telemetry rows")
     df = df.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    if df["bin_id"].isna().any() or df["bin_id"].astype(str).str.strip().eq("").any():
+        raise ValueError("bin_id contains missing or empty values")
+    df["bin_id"] = df["bin_id"].astype(str).str.strip()
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
     if df["timestamp"].isna().any():
         raise ValueError("timestamp contains invalid values")
 
-    df = df.sort_values(by=["bin_id", "timestamp"]).reset_index(drop=True)
-    df["fill_level_pct"] = pd.to_numeric(df["fill_level_pct"], errors="coerce").clip(0, 100)
-    if df["fill_level_pct"].isna().any():
-        raise ValueError("fill_level_pct contains invalid values")
+    numeric_ranges = {
+        "latitude": (-90.0, 90.0),
+        "longitude": (-180.0, 180.0),
+        "capacity_liters": (0.0, None),
+        "fill_level_pct": (0.0, 100.0),
+        "temperature_c": (-50.0, 80.0),
+    }
+    for column, (minimum, maximum) in numeric_ranges.items():
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+        values = df[column].to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError(f"{column} contains missing or non-finite values")
+        if (values < minimum).any() or (maximum is not None and (values > maximum).any()):
+            if column == "fill_level_pct":
+                raise ValueError("fill_level_pct must be between 0 and 100; values are not silently clipped")
+            raise ValueError(f"{column} contains values outside its valid range")
 
+    if (df["capacity_liters"] <= 0).any():
+        raise ValueError("capacity_liters must be greater than zero")
+    if df.duplicated(["bin_id", "timestamp"]).any():
+        raise ValueError("Dataset contains duplicate timestamps for the same bin")
+
+    df = df.sort_values(["bin_id", "timestamp"]).reset_index(drop=True)
     df["hour"] = df["timestamp"].dt.hour
-    df["day_of_week"] = df["timestamp"].dt.dayofweek
+    df["day_of_week"] = df["timestamp"].dt.day_of_week
     df["is_weekend"] = df["day_of_week"].isin([5, 6]).astype(int)
 
-    grouped_fill = df.groupby("bin_id")["fill_level_pct"]
-    df["fill_lag_1h"] = grouped_fill.shift(1)
-    df["fill_lag_3h"] = grouped_fill.shift(3)
-    # Shift the rolling window so the current target is never included.
-    df["rolling_mean_6h"] = grouped_fill.transform(
-        lambda x: x.shift(1).rolling(6, min_periods=1).mean()
-    )
+    grouped = df.groupby("bin_id", sort=False)
+    grouped_fill = grouped["fill_level_pct"]
+    interval_1 = grouped["timestamp"].diff().dt.total_seconds().div(60)
+    interval_2 = interval_1.groupby(df["bin_id"], sort=False).shift(1)
+    interval_3 = interval_1.groupby(df["bin_id"], sort=False).shift(2)
+    elapsed_3 = grouped["timestamp"].diff(3).dt.total_seconds().div(60)
 
-    # Leave insufficient-history rows missing. Backfilling from later rows
-    # would leak future fill values into features for earlier prediction times.
-    # The model-training path drops rows without complete historical features.
+    valid_one_hour = interval_1.between(30, 90)
+    valid_three_hour = (
+        elapsed_3.between(150, 210)
+        & valid_one_hour
+        & interval_2.between(30, 90)
+        & interval_3.between(30, 90)
+    )
+    df["fill_lag_1h"] = grouped_fill.shift(1).where(valid_one_hour)
+    df["fill_lag_3h"] = grouped_fill.shift(3).where(valid_three_hour)
+
+    # A true time-based rolling window excludes the current observation.
+    # Requiring three prior readings prevents a one- or two-point "6h mean"
+    # from masquerading as a six-hour history feature.
+    df["rolling_mean_6h"] = np.nan
+    for _, indices in df.groupby("bin_id", sort=False).groups.items():
+        history = df.loc[indices].set_index("timestamp")["fill_level_pct"]
+        rolling = history.rolling("6h", closed="left", min_periods=3).mean()
+        df.loc[indices, "rolling_mean_6h"] = rolling.to_numpy()
+
     return df
