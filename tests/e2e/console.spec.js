@@ -331,6 +331,10 @@ test("operator can sign in with a named account, use an expiring session and sig
   expect(await page.evaluate(() => document.cookie)).not.toContain("wasteops_session");
   await expect(page.locator("#operatorUsersPanel")).toBeHidden();
   await expect(page.locator("#passwordPanel")).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Connect & load bins" }).click();
+  await expect(page.getByRole("status")).toContainText(/Loaded 0 bins from API/i);
+  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("status")).toContainText(/Signed out/i);
   expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
