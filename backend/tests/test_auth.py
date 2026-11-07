@@ -166,3 +166,70 @@ def test_repeated_failed_password_attempts_lock_account(monkeypatch):
     locked = login("rootadmin", "incorrect-password")
     assert locked.status_code == 423
     assert login("rootadmin", "correct-horse-battery-staple").status_code == 423
+
+
+def test_operator_cannot_enroll_or_rotate_device_credentials(monkeypatch):
+    bootstrap(monkeypatch)
+    admin_token = login().json()["access_token"]
+    admin_headers = {"Authorization": "Bearer " + admin_token}
+    bin_payload = {
+        "id": "bin-authz",
+        "latitude": 28.6,
+        "longitude": 77.2,
+        "capacity_liters": 1000,
+        "criticality": 2,
+        "source": "demo",
+    }
+    assert client.post("/api/v1/bins", json=bin_payload, headers=admin_headers).status_code == 201
+    client.post(
+        "/api/v1/auth/users",
+        headers=admin_headers,
+        json={"username": "fieldops", "password": "field-operator-password", "role": "operator"},
+    )
+    operator_token = login("fieldops", "field-operator-password").json()["access_token"]
+    operator_headers = {"Authorization": "Bearer " + operator_token}
+    forbidden = client.post(
+        "/api/v1/devices",
+        headers=operator_headers,
+        json={"id": "sensor-authz", "bin_id": "bin-authz"},
+    )
+    assert forbidden.status_code == 403
+    enrolled = client.post(
+        "/api/v1/devices",
+        headers=admin_headers,
+        json={"id": "sensor-authz", "bin_id": "bin-authz"},
+    )
+    assert enrolled.status_code == 201
+    assert client.post(
+        "/api/v1/devices/sensor-authz/rotate-token",
+        headers=operator_headers,
+    ).status_code == 403
+
+
+def test_service_event_actor_comes_from_authenticated_session_not_request_body(monkeypatch):
+    bootstrap(monkeypatch)
+    token = login().json()["access_token"]
+    headers = {"Authorization": "Bearer " + token}
+    bin_payload = {
+        "id": "bin-audit-actor",
+        "latitude": 28.6,
+        "longitude": 77.2,
+        "capacity_liters": 1000,
+        "criticality": 2,
+        "source": "demo",
+    }
+    assert client.post("/api/v1/bins", json=bin_payload, headers=headers).status_code == 201
+    job = client.post(
+        "/api/v1/jobs",
+        headers=headers,
+        json={"bin_id": "bin-audit-actor", "demand_liters": 100},
+    ).json()
+    transition = client.post(
+        "/api/v1/jobs/" + job["id"] + "/transitions",
+        headers=headers,
+        json={"status": "approved", "actor": "forged-admin-name"},
+    )
+    assert transition.status_code == 200
+    events = client.get("/api/v1/jobs/" + job["id"] + "/events", headers=headers).json()
+    assert events[-1]["actor"] == "rootadmin"
+    assert events[-1]["actor"] != "forged-admin-name"
