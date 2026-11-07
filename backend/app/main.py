@@ -246,9 +246,13 @@ def create_operator_user(payload: OperatorUserCreate, principal: dict = Depends(
         raise HTTPException(status_code=409, detail="Username already exists")
     user = OperatorUser(id=str(uuid4()), username=payload.username, password_hash=hash_password(payload.password), role=payload.role)
     db.add(user)
-    db.flush()
-    _audit(db, principal["user_id"], "operator_user_created", user.username)
-    db.commit()
+    try:
+        db.flush()
+        _audit(db, principal["user_id"], "operator_user_created", user.username)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Username already exists") from exc
     return {"id": user.id, "username": user.username, "role": user.role, "active": user.active}
 
 
