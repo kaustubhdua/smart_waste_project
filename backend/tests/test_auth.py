@@ -1,0 +1,139 @@
+import os
+from datetime import datetime, timedelta, timezone
+
+os.environ["DATABASE_URL"] = "sqlite:///./test_smart_waste.db"
+os.environ["API_TOKEN"] = "test-operator-token"
+
+from fastapi.testclient import TestClient
+
+from app.auth import hash_password, verify_password
+from app.config import settings
+from app.db import Base, SessionLocal, engine
+from app.main import app
+from app.models import OperatorSession, OperatorUser
+
+client = TestClient(app)
+
+
+def setup_function():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+
+def bootstrap(monkeypatch, username="rootadmin", password="correct-horse-battery-staple"):
+    token = "bootstrap-secret-for-tests-" + ("x" * 32)
+    monkeypatch.setattr(settings, "api_token", token)
+    response = client.post(
+        "/api/v1/auth/bootstrap",
+        headers={"X-Bootstrap-Token": token},
+        json={"username": username, "password": password},
+    )
+    return token, response
+
+
+def login(username="rootadmin", password="correct-horse-battery-staple"):
+    return client.post("/api/v1/auth/login", json={"username": username, "password": password})
+
+
+def test_password_hashing_is_salted_and_verifiable():
+    first = hash_password("correct-horse-battery-staple")
+    second = hash_password("correct-horse-battery-staple")
+    assert first != second
+    assert verify_password("correct-horse-battery-staple", first)
+    assert not verify_password("wrong-password", first)
+    assert not verify_password("correct-horse-battery-staple", "malformed")
+
+
+def test_bootstrap_is_one_time_and_never_stores_plaintext_password(monkeypatch):
+    _, response = bootstrap(monkeypatch)
+    assert response.status_code == 201, response.text
+    with SessionLocal() as db:
+        user = db.query(OperatorUser).filter_by(username="rootadmin").one()
+        assert user.password_hash != "correct-horse-battery-staple"
+        assert verify_password("correct-horse-battery-staple", user.password_hash)
+    second = client.post(
+        "/api/v1/auth/bootstrap",
+        headers={"X-Bootstrap-Token": settings.api_token},
+        json={"username": "anotheradmin", "password": "another-secure-password"},
+    )
+    assert second.status_code == 409
+
+
+def test_login_session_identity_logout_and_revocation(monkeypatch):
+    bootstrap(monkeypatch)
+    response = login()
+    assert response.status_code == 200, response.text
+    token = response.json()["access_token"]
+    assert response.json()["user"]["role"] == "admin"
+    headers = {"Authorization": "Bearer " + token}
+    assert client.get("/api/v1/auth/me", headers=headers).json()["username"] == "rootadmin"
+    assert client.get("/api/v1/bins", headers=headers).status_code == 200
+    assert client.post("/api/v1/auth/logout", headers=headers).json()["logged_out"] is True
+    assert client.get("/api/v1/bins", headers=headers).status_code == 401
+
+
+def test_admin_can_create_operator_but_operator_cannot_manage_users(monkeypatch):
+    bootstrap(monkeypatch)
+    admin_token = login().json()["access_token"]
+    admin_headers = {"Authorization": "Bearer " + admin_token}
+    created = client.post(
+        "/api/v1/auth/users",
+        headers=admin_headers,
+        json={"username": "dispatcher1", "password": "dispatcher-password-123", "role": "operator"},
+    )
+    assert created.status_code == 201, created.text
+    operator_token = login("dispatcher1", "dispatcher-password-123").json()["access_token"]
+    operator_headers = {"Authorization": "Bearer " + operator_token}
+    assert client.get("/api/v1/bins", headers=operator_headers).status_code == 200
+    assert client.get("/api/v1/auth/users", headers=operator_headers).status_code == 403
+    forbidden = client.post(
+        "/api/v1/auth/users",
+        headers=operator_headers,
+        json={"username": "intruder", "password": "intruder-password-123", "role": "admin"},
+    )
+    assert forbidden.status_code == 403
+
+
+def test_admin_revocation_invalidates_all_existing_sessions(monkeypatch):
+    bootstrap(monkeypatch)
+    admin_token = login().json()["access_token"]
+    admin_headers = {"Authorization": "Bearer " + admin_token}
+    client.post(
+        "/api/v1/auth/users",
+        headers=admin_headers,
+        json={"username": "dispatcher2", "password": "dispatcher-password-456", "role": "operator"},
+    )
+    operator_token = login("dispatcher2", "dispatcher-password-456").json()["access_token"]
+    revoked = client.post("/api/v1/auth/users/dispatcher2/revoke", headers=admin_headers)
+    assert revoked.status_code == 200
+    assert client.get("/api/v1/bins", headers={"Authorization": "Bearer " + operator_token}).status_code == 401
+
+
+def test_last_active_administrator_cannot_be_revoked(monkeypatch):
+    bootstrap(monkeypatch)
+    token = login().json()["access_token"]
+    response = client.post(
+        "/api/v1/auth/users/rootadmin/revoke",
+        headers={"Authorization": "Bearer " + token},
+    )
+    assert response.status_code == 409
+
+
+def test_expired_sessions_are_rejected(monkeypatch):
+    bootstrap(monkeypatch)
+    token = login().json()["access_token"]
+    with SessionLocal() as db:
+        session = db.query(OperatorSession).one()
+        session.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    response = client.get("/api/v1/bins", headers={"Authorization": "Bearer " + token})
+    assert response.status_code == 401
+
+
+def test_shared_api_token_is_not_accepted_as_production_operator_credential(monkeypatch):
+    _, created = bootstrap(monkeypatch)
+    assert created.status_code == 201
+    token = settings.api_token
+    monkeypatch.setattr(settings, "app_env", "production")
+    response = client.get("/api/v1/bins", headers={"Authorization": "Bearer " + token})
+    assert response.status_code == 401
