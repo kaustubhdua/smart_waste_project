@@ -299,6 +299,9 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)):
     bin_row = db.get(Bin, payload.bin_id)
     if not bin_row:
         raise HTTPException(404, "Unknown bin")
+    open_job_id = db.scalar(select(CollectionJob.id).where(CollectionJob.bin_id == payload.bin_id, CollectionJob.status != "verified").limit(1))
+    if open_job_id is not None:
+        raise HTTPException(409, f"Bin {payload.bin_id} already has an open collection job ({open_job_id}); verify or resolve it before creating another")
     latest = db.scalar(select(Telemetry).where(Telemetry.bin_id == payload.bin_id).order_by(Telemetry.measured_at.desc()).limit(1))
     demand = payload.demand_liters
     if demand is None and latest is not None and _is_stale(latest.measured_at):
