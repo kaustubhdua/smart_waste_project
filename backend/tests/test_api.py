@@ -223,28 +223,50 @@ def test_csv_import_rejects_unknown_bins_without_partial_commit():
     response = client.post("/api/v1/telemetry/import-csv", files={"file":("readings.csv",csv_body,"text/csv")}, headers=OP)
     assert response.status_code == 422
 
-def test_forecast_endpoint_uses_loaded_artifact_and_real_history(monkeypatch):
+def test_forecast_endpoint_uses_loaded_artifact_and_real_hourly_history(monkeypatch):
     import app.main as main_module
 
     class FakeModel:
         def predict(self, frame):
             assert list(frame.columns) == main_module.MODEL_FEATURES
             assert frame.iloc[0]["temperature_c"] == 25.0
+            assert frame.iloc[0]["fill_lag_3h"] == 20
+            assert frame.iloc[0]["rolling_mean_6h"] == 27.5
             return [67.5]
 
     b = {"id":"bin-forecast","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":3,"source":"live"}
     assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
     headers = register_device("forecast-device", "bin-forecast")
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    for idx, fill in enumerate((20, 28, 35)):
-        event = {"bin_id":"bin-forecast","device_id":"forecast-device","message_id":f"forecast-{idx}","fill_percent":fill,"temperature_c":25.0,"measured_at":(now-timedelta(hours=2-idx)).isoformat()}
+    for idx, fill in enumerate((20, 25, 30, 35)):
+        event = {"bin_id":"bin-forecast","device_id":"forecast-device","message_id":f"forecast-{idx}","fill_percent":fill,"temperature_c":25.0,"measured_at":(now-timedelta(hours=3-idx)).isoformat()}
         assert client.post("/api/v1/telemetry", json=event, headers=headers).status_code == 202
-    artifact = {"model":FakeModel(),"features":main_module.MODEL_FEATURES,"metrics":{"evaluation_note":"test fixture"},"target":"next observed fill"}
+    artifact = {"model":FakeModel(),"features":main_module.MODEL_FEATURES,"feature_schema_version":main_module.MODEL_FEATURE_SCHEMA_VERSION,"metrics":{"evaluation_note":"test fixture"},"target":"next observed fill"}
     monkeypatch.setattr(main_module, "_load_forecast_artifact", lambda: artifact)
     response = client.get("/api/v1/forecasts", headers=OP)
     assert response.status_code == 200, response.text
     assert response.json()["predictions"][0]["predicted_next_fill_percent"] == 67.5
     assert response.json()["forecast_semantics"].startswith("next observed fill")
+
+
+def test_forecast_skips_legacy_feature_schema(monkeypatch):
+    import app.main as main_module
+
+    b = {"id":"bin-forecast-old","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":3,"source":"live"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    headers = register_device("forecast-old-device", "bin-forecast-old")
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    for idx, fill in enumerate((20, 25, 30, 35)):
+        event = {"bin_id":"bin-forecast-old","device_id":"forecast-old-device","message_id":f"forecast-old-{idx}","fill_percent":fill,"temperature_c":25.0,"measured_at":(now-timedelta(hours=3-idx)).isoformat()}
+        assert client.post("/api/v1/telemetry", json=event, headers=headers).status_code == 202
+    artifact = {"model":object(),"features":main_module.MODEL_FEATURES,"feature_schema_version":1,"metrics":{}}
+    monkeypatch.setattr(main_module, "_load_forecast_artifact", lambda: artifact)
+    response = client.get("/api/v1/forecasts", headers=OP)
+    assert response.status_code == 200
+    assert response.json()["predictions"] == []
+    skipped = {item["bin_id"]: item["reason"] for item in response.json()["skipped"]}
+    assert skipped["bin-forecast-old"] == "model_feature_schema_mismatch"
+
 
 def test_job_demand_cannot_exceed_bin_capacity():
     b = {"id":"bin-capacity","latitude":28.6,"longitude":77.2,"capacity_liters":100,"criticality":2,"source":"demo"}
@@ -524,3 +546,25 @@ def test_database_rejects_a_second_open_job_even_when_preflight_is_bypassed():
         db.close()
 
     assert len(client.get("/api/v1/jobs", headers=OP).json()) == 1
+
+
+def test_forecast_skips_insufficient_history_for_current_feature_schema(monkeypatch):
+    import app.main as main_module
+
+    class FakeModel:
+        def predict(self, frame):
+            raise AssertionError("Model must not run without four recent hourly observations")
+
+    b = {"id":"bin-forecast-short","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":3,"source":"live"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    headers = register_device("forecast-short-device", "bin-forecast-short")
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    for idx, fill in enumerate((20, 28, 35)):
+        event = {"bin_id":"bin-forecast-short","device_id":"forecast-short-device","message_id":f"forecast-short-{idx}","fill_percent":fill,"temperature_c":25.0,"measured_at":(now-timedelta(hours=2-idx)).isoformat()}
+        assert client.post("/api/v1/telemetry", json=event, headers=headers).status_code == 202
+    artifact = {"model":FakeModel(),"features":main_module.MODEL_FEATURES,"feature_schema_version":main_module.MODEL_FEATURE_SCHEMA_VERSION,"metrics":{}}
+    monkeypatch.setattr(main_module, "_load_forecast_artifact", lambda: artifact)
+    response = client.get("/api/v1/forecasts", headers=OP)
+    assert response.status_code == 200
+    skipped = {item["bin_id"]: item["reason"] for item in response.json()["skipped"]}
+    assert skipped["bin-forecast-short"] == "insufficient_history"
