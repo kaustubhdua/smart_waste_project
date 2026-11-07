@@ -16,6 +16,7 @@ client = TestClient(app)
 
 
 def setup_function():
+    client.cookies.clear()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
@@ -236,3 +237,23 @@ def test_service_event_actor_comes_from_authenticated_session_not_request_body(m
     events = client.get("/api/v1/jobs/" + job["id"] + "/events", headers=headers).json()
     assert events[-1]["actor"] == "rootadmin"
     assert events[-1]["actor"] != "forged-admin-name"
+
+
+def test_cookie_authenticated_mutations_reject_untrusted_origins(monkeypatch):
+    bootstrap(monkeypatch)
+    signed_in = login()
+    assert signed_in.status_code == 200
+    assert "HttpOnly" in signed_in.headers["set-cookie"]
+    assert "SameSite=strict" in signed_in.headers["set-cookie"]
+    assert "wasteops_session" not in signed_in.json()
+    denied = client.post(
+        "/api/v1/auth/logout",
+        headers={"Origin": "https://attacker.example"},
+    )
+    assert denied.status_code == 403
+    allowed = client.post(
+        "/api/v1/auth/logout",
+        headers={"Origin": "http://localhost:8080"},
+    )
+    assert allowed.status_code == 200
+    assert "Max-Age=0" in allowed.headers["set-cookie"]
