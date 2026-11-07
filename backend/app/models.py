@@ -139,3 +139,9 @@ class OperatorAuditEvent(Base):
     action: Mapped[str] = mapped_column(String(64), index=True)
     subject: Mapped[str] = mapped_column(String(128), default='')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OperatorBootstrap(Base):
+    __tablename__ = 'operator_bootstrap'
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
