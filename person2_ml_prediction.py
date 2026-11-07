@@ -33,10 +33,13 @@ def train_ml_model(csv_path="cleaned_waste_data.csv", model_path=MODEL_FILENAME)
     missing = set(FEATURES).difference(df.columns)
     if missing:
         raise ValueError(f"Dataset is missing features: {sorted(missing)}")
-    for feature in FEATURES + ["fill_level_pct"]:
+    for feature in FEATURES:
         df[feature] = pd.to_numeric(df[feature], errors="coerce")
-        if not np.isfinite(df[feature].to_numpy(dtype=float)).all():
-            raise ValueError(f"{feature} contains missing or non-finite values")
+        if np.isinf(df[feature].to_numpy(dtype=float)).any():
+            raise ValueError(f"{feature} contains infinite values")
+    df["fill_level_pct"] = pd.to_numeric(df["fill_level_pct"], errors="coerce")
+    if not np.isfinite(df["fill_level_pct"].to_numpy(dtype=float)).all():
+        raise ValueError("fill_level_pct contains missing or non-finite values")
     if not df["fill_level_pct"].between(0, 100).all():
         raise ValueError("fill_level_pct must be between 0 and 100")
 
