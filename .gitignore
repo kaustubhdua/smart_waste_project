@@ -19,3 +19,8 @@ htmlcov/
 node_modules/
 test-results/
 playwright-report/
+
+# Operational database backups may contain sensitive personal and service data.
+/backups/
+*.dump
+*.backup
