@@ -569,3 +569,29 @@ def test_forecast_skips_insufficient_history_for_current_feature_schema(monkeypa
     assert response.status_code == 200
     skipped = {item["bin_id"]: item["reason"] for item in response.json()["skipped"]}
     assert skipped["bin-forecast-short"] == "insufficient_history"
+
+
+def test_nearby_bins_returns_distance_order_and_enforces_radius():
+    bins = [
+        {"id": "near-center", "latitude": 28.6, "longitude": 77.2, "capacity_liters": 1000, "criticality": 2, "source": "live"},
+        {"id": "near-next", "latitude": 28.601, "longitude": 77.2, "capacity_liters": 1000, "criticality": 2, "source": "live"},
+        {"id": "near-far", "latitude": 28.7, "longitude": 77.2, "capacity_liters": 1000, "criticality": 2, "source": "live"},
+    ]
+    for payload in bins:
+        assert client.post("/api/v1/bins", json=payload, headers=OP).status_code == 201
+
+    response = client.get(
+        "/api/v1/bins/nearby",
+        params={"latitude": 28.6, "longitude": 77.2, "radius_meters": 500},
+        headers=OP,
+    )
+    assert response.status_code == 200, response.text
+    results = response.json()
+    assert [row["id"] for row in results] == ["near-center", "near-next"]
+    assert results[0]["distance_meters"] == 0
+    assert 100 < results[1]["distance_meters"] < 120
+    assert client.get(
+        "/api/v1/bins/nearby",
+        params={"latitude": 28.6, "longitude": 77.2, "radius_meters": 50001},
+        headers=OP,
+    ).status_code == 422
