@@ -161,7 +161,7 @@ def test_password_change_revokes_other_sessions_and_preserves_current_session(mo
 
 def test_repeated_failed_password_attempts_lock_account(monkeypatch):
     bootstrap(monkeypatch)
-    for _ in range(7):
+    for _ in range(8):
         assert login("rootadmin", "incorrect-password").status_code == 401
     locked = login("rootadmin", "incorrect-password")
     assert locked.status_code == 423
