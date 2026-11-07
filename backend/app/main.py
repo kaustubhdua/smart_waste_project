@@ -115,9 +115,9 @@ def _audit(db: Session, actor_user_id: str | None, action: str, subject: str = "
 
 
 def get_current_operator(
+    request: Request,
     authorization: str | None = Header(default=None),
     wasteops_session: str | None = Cookie(default=None),
-    request: Request = None,
     db: Session = Depends(get_db),
 ):
     raw_token = (
