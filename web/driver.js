@@ -43,8 +43,11 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
-    if (controller.signal.aborted) throw new Error("The request timed out after 15 seconds. Check API availability and try again.");
-    throw new Error("Could not reach the API. Check the network connection and configured API URL, then try again.");
+    const networkError = new Error(controller.signal.aborted
+      ? "The request timed out after 15 seconds. Check API availability and try again."
+      : "Could not reach the API. Check the network connection and configured API URL, then try again.");
+    networkError.network = true;
+    throw networkError;
   } finally { clearTimeout(timer); }
 }
 async function request(path, options = {}) {
@@ -246,12 +249,12 @@ async function loadJobs() {
     await renderJobs(jobs);
     setStatus("Loaded " + jobs.length + " assigned stops.", "ok");
   } catch (error) {
-    if (!error.status || error.status >= 500) {
+    if (error.network || (error.status && error.status >= 500)) {
       const cached = await cachedJobs($("driverId").value.trim());
       await renderJobs(cached);
       setStatus(cached.length
-        ? "Offline or API unavailable · showing " + cached.length + " cached stops. New actions will be queued locally."
-        : "Offline or API unavailable · no previously cached stops on this device.", "error");
+        ? "Could not reach the API · offline; showing " + cached.length + " cached stops. New actions will be queued locally."
+        : "Could not reach the API · offline and no previously cached stops are available on this device.", "error");
     } else {
       setStatus(error.message, "error");
     }
@@ -292,7 +295,7 @@ async function transition(jobId, status) {
     setStatus("Job updated: " + status, "ok");
     await loadJobs();
   } catch (error) {
-    if (!error.status || error.status >= 500 || error.status === 429) {
+    if (error.network || (error.status && error.status >= 500) || error.status === 429) {
       await writeRecord("actions", action);
       setStatus("API could not confirm the action. It has been queued locally and will replay with the same idempotency key.", "ok");
       await renderQueue();
@@ -318,7 +321,7 @@ async function syncQueue() {
         await sendQueuedAction(action);
         await deleteRecord("actions", action.idempotencyKey);
       } catch (error) {
-        if (error.status === 401 || error.status === 429 || !error.status || error.status >= 500) {
+        if (error.status === 401 || error.status === 429 || error.network || (error.status && error.status >= 500)) {
           setStatus("Sync paused: " + error.message + ". Pending actions remain safely stored.", "error");
           break;
         }
