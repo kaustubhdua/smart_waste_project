@@ -145,3 +145,13 @@ class OperatorBootstrap(Base):
     __tablename__ = 'operator_bootstrap'
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DriverAction(Base):
+    __tablename__ = "driver_actions"
+    idempotency_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.id"), index=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("collection_jobs.id"), index=True)
+    action: Mapped[str] = mapped_column(String(30))
+    response_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
