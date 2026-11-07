@@ -96,7 +96,7 @@ def preprocess_data(df):
 
     df = df.sort_values(["bin_id", "timestamp"]).reset_index(drop=True)
     df["hour"] = df["timestamp"].dt.hour
-    df["day_of_week"] = df["timestamp"].dt.dayofweek
+    df["day_of_week"] = df["timestamp"].dt.day_of_week
     df["is_weekend"] = df["day_of_week"].isin([5, 6]).astype(int)
 
     grouped = df.groupby("bin_id", sort=False)
