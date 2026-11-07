@@ -10,7 +10,7 @@ from hmac import compare_digest
 from hashlib import sha256
 from secrets import token_urlsafe
 from uuid import uuid4
-from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, Header, Cookie, HTTPException, UploadFile, File, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
@@ -114,10 +114,16 @@ def _audit(db: Session, actor_user_id: str | None, action: str, subject: str = "
     db.add(OperatorAuditEvent(actor_user_id=actor_user_id, action=action, subject=subject[:128]))
 
 
-def get_current_operator(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Operator sign-in required")
-    raw_token = authorization[7:].strip()
+def get_current_operator(
+    authorization: str | None = Header(default=None),
+    wasteops_session: str | None = Cookie(default=None),
+    db: Session = Depends(get_db),
+):
+    raw_token = wasteops_session or (
+        authorization[7:].strip()
+        if authorization and authorization.startswith("Bearer ")
+        else ""
+    )
     if not raw_token:
         raise HTTPException(status_code=401, detail="Operator sign-in required")
     configured = settings.api_token
@@ -172,7 +178,7 @@ def bootstrap_admin(payload: AuthBootstrap, x_bootstrap_token: str | None = Head
 
 
 @app.post("/api/v1/auth/login")
-def operator_login(payload: AuthLogin, db: Session = Depends(get_db)):
+def operator_login(payload: AuthLogin, response: Response, db: Session = Depends(get_db)):
     user = db.scalar(select(OperatorUser).where(OperatorUser.username == payload.username))
     if user is None:
         verify_password(payload.password, _DUMMY_PASSWORD_HASH)
@@ -198,7 +204,8 @@ def operator_login(payload: AuthLogin, db: Session = Depends(get_db)):
     db.add(session)
     _audit(db, user.id, "login_succeeded", user.username)
     db.commit()
-    return {"access_token": raw_token, "token_type": "bearer", "expires_at": session.expires_at, "user": {"id": user.id, "username": user.username, "role": user.role}}
+    response.set_cookie(key="wasteops_session", value=raw_token, max_age=8 * 60 * 60, httponly=True, secure=settings.app_env.strip().lower() == "production", samesite="strict", path="/api/v1")
+    return {"expires_at": session.expires_at, "user": {"id": user.id, "username": user.username, "role": user.role}}
 
 
 @app.get("/api/v1/auth/me", dependencies=[Depends(require_operator)])
@@ -207,13 +214,14 @@ def operator_identity(principal: dict = Depends(get_current_operator)):
 
 
 @app.post("/api/v1/auth/logout", dependencies=[Depends(require_operator)])
-def operator_logout(principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
+def operator_logout(response: Response, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
     if principal["session_id"]:
         session = db.get(OperatorSession, principal["session_id"])
         if session and session.revoked_at is None:
             session.revoked_at = datetime.now(timezone.utc)
             _audit(db, principal["user_id"], "logout", principal["username"])
             db.commit()
+    response.delete_cookie(key="wasteops_session", path="/api/v1", httponly=True, secure=settings.app_env.strip().lower() == "production", samesite="strict")
     return {"logged_out": True}
 
 
@@ -227,11 +235,15 @@ def change_operator_password(payload: AuthPasswordChange, principal: dict = Depe
     user.password_hash = hash_password(payload.new_password)
     now = datetime.now(timezone.utc)
     for session in db.scalars(select(OperatorSession).where(OperatorSession.operator_user_id == user.id, OperatorSession.revoked_at.is_(None))):
-        if session.id != principal["session_id"]:
-            session.revoked_at = now
+        session.revoked_at = now
+    raw_token = token_urlsafe(48)
+    renewed = OperatorSession(id=str(uuid4()), operator_user_id=user.id, token_hash=hash_session_token(raw_token), expires_at=now + timedelta(hours=8))
+    db.add(renewed)
     _audit(db, user.id, "password_changed", user.username)
     db.commit()
-    return {"password_changed": True, "other_sessions_revoked": True}
+    response = Response()
+    response.set_cookie(key="wasteops_session", value=raw_token, max_age=8 * 60 * 60, httponly=True, secure=settings.app_env.strip().lower() == "production", samesite="strict", path="/api/v1")
+    return response
 
 
 @app.get("/api/v1/auth/users", dependencies=[Depends(require_admin)])
