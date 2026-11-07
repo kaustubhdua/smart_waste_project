@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 from .auth import hash_password, verify_password, hash_session_token
 from .config import settings
 from .db import Base, engine, get_db
-from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device, Driver, OperatorUser, OperatorSession, OperatorAuditEvent
-from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate, DriverCreate, DriverTransition, AuthBootstrap, AuthLogin, OperatorUserCreate
+from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device, Driver, OperatorUser, OperatorSession, OperatorAuditEvent, OperatorBootstrap
+from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate, DriverCreate, DriverTransition, AuthBootstrap, AuthLogin, OperatorUserCreate, AuthPasswordChange
 from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 from .priority import calculate_priority
@@ -156,13 +156,18 @@ def bootstrap_admin(payload: AuthBootstrap, x_bootstrap_token: str | None = Head
     placeholder = token.strip() != token or len(token) < 32 or token.lower().startswith(("change-me", "replace-with")) or any(character.isspace() for character in token)
     if placeholder or not x_bootstrap_token or not compare_digest(x_bootstrap_token, token):
         raise HTTPException(status_code=401, detail="Valid bootstrap credential required")
-    if db.scalar(select(OperatorUser.id).limit(1)):
+    if db.get(OperatorBootstrap, "initial_admin") or db.scalar(select(OperatorUser.id).limit(1)):
         raise HTTPException(status_code=409, detail="Initial administrator has already been created")
     user = OperatorUser(id=str(uuid4()), username=payload.username, password_hash=hash_password(payload.password), role="admin")
     db.add(user)
+    db.add(OperatorBootstrap(id="initial_admin"))
     db.flush()
     _audit(db, user.id, "bootstrap_admin_created", user.username)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Initial administrator has already been created") from exc
     return {"id": user.id, "username": user.username, "role": user.role, "active": user.active}
 
 
@@ -209,6 +214,23 @@ def operator_logout(principal: dict = Depends(get_current_operator), db: Session
             _audit(db, principal["user_id"], "logout", principal["username"])
             db.commit()
     return {"logged_out": True}
+
+
+@app.post("/api/v1/auth/change-password", dependencies=[Depends(require_operator)])
+def change_operator_password(payload: AuthPasswordChange, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
+    user = db.get(OperatorUser, principal["user_id"])
+    if not user or not user.active or not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=422, detail="New password must differ from the current password")
+    user.password_hash = hash_password(payload.new_password)
+    now = datetime.now(timezone.utc)
+    for session in db.scalars(select(OperatorSession).where(OperatorSession.operator_user_id == user.id, OperatorSession.revoked_at.is_(None))):
+        if session.id != principal["session_id"]:
+            session.revoked_at = now
+    _audit(db, user.id, "password_changed", user.username)
+    db.commit()
+    return {"password_changed": True, "other_sessions_revoked": True}
 
 
 @app.get("/api/v1/auth/users", dependencies=[Depends(require_admin)])
