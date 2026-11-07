@@ -69,13 +69,15 @@ def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
     # Six hours at the supported 30-minute minimum cadence can contain
     # thirteen readings. Fetch enough history to construct the same true
     # time-based window used during training.
-    rows = list(db.scalars(select(Telemetry).where(Telemetry.bin_id == bin_row.id).order_by(Telemetry.measured_at.desc()).limit(50)))
+    rows = list(db.scalars(select(Telemetry).where(Telemetry.bin_id == bin_row.id).order_by(Telemetry.measured_at.desc()).limit(1000)))
     rows.reverse()
     if not rows:
         return None, "insufficient_history"
     latest = rows[-1]
     recent_cutoff = _utc(latest.measured_at) - timedelta(hours=6)
     recent_rows = [row for row in rows if _utc(row.measured_at) >= recent_cutoff]
+    if len(recent_rows) >= 1000:
+        return None, "history_density_too_high"
     if len(recent_rows) < 4:
         return None, "insufficient_history"
     intervals_minutes = [
