@@ -8,7 +8,7 @@ os.environ["API_TOKEN"] = "test-operator-token"
 
 from app.main import app
 from app.db import Base, engine, SessionLocal
-from app.models import CollectionJob
+from app.models import CollectionJob, Bin
 from sqlalchemy.exc import IntegrityError
 
 client = TestClient(app)
@@ -341,12 +341,17 @@ def test_driver_workflow_is_vehicle_scoped_and_tokens_rotate():
     completed = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"completed","note":"collected"}, headers=driver_headers)
     assert completed.status_code == 200
     assert client.get("/api/v1/driver/jobs", headers=driver_headers).json() == []
-    # Completion releases an idle vehicle immediately; verification is a later audit step.
+    # Completion releases an idle vehicle immediately, but is not yet proof
+    # of verified emptying. The priority clock advances only after verification.
     available_after_completion = client.get("/api/v1/vehicles", headers=OP).json()[0]
     assert available_after_completion["available"] is True
+    with SessionLocal() as db:
+        assert db.get(Bin, "bin-driver-flow").last_emptied_at is None
 
     verified = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"verified","actor":"operator"}, headers=OP)
     assert verified.status_code == 200
+    with SessionLocal() as db:
+        assert db.get(Bin, "bin-driver-flow").last_emptied_at is not None
     vehicle = client.get("/api/v1/vehicles", headers=OP).json()[0]
     assert vehicle["available"] is True
     events = client.get(f"/api/v1/jobs/{job_id}/events", headers=OP).json()
