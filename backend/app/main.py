@@ -6,7 +6,6 @@ from pathlib import Path
 from statistics import mean
 import joblib
 import pandas as pd
-import json
 from hmac import compare_digest
 from hashlib import sha256
 from secrets import token_urlsafe
@@ -662,6 +661,7 @@ def assign_job(job_id: str, payload: JobAssign, principal: dict = Depends(get_cu
 
 @app.post("/api/v1/jobs/{job_id}/transitions", dependencies=[Depends(require_operator)])
 def transition_job(job_id: str, payload: TransitionIn, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
+    request_hash = sha256(json.dumps({"status": payload.status, "note": payload.note}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
     if not job:
         raise HTTPException(404, "Unknown job")
@@ -804,7 +804,7 @@ def driver_transition(
         raise HTTPException(404, "Unknown job")
     existing = db.get(DriverAction, key)
     if existing:
-        if existing.driver_id != driver.id or existing.job_id != job_id or existing.action != payload.status:
+        if existing.driver_id != driver.id or existing.job_id != job_id or existing.action != payload.status or existing.request_hash != request_hash:
             raise HTTPException(409, "Idempotency-Key was already used for a different driver action")
         return json.loads(existing.response_json)
 
@@ -828,6 +828,7 @@ def driver_transition(
         driver_id=driver.id,
         job_id=job.id,
         action=payload.status,
+        request_hash=request_hash,
         response_json=json.dumps(response),
     ))
     try:
@@ -835,7 +836,7 @@ def driver_transition(
     except IntegrityError:
         db.rollback()
         existing = db.get(DriverAction, key)
-        if existing and existing.driver_id == driver.id and existing.job_id == job_id and existing.action == payload.status:
+        if existing and existing.driver_id == driver.id and existing.job_id == job_id and existing.action == payload.status and existing.request_hash == request_hash:
             return json.loads(existing.response_json)
         raise HTTPException(409, "Driver action idempotency conflict")
     return response
