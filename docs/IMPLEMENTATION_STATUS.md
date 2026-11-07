@@ -4,6 +4,7 @@
 - FastAPI API with shared operator bearer token and individually enrolled device/driver tokens; device and driver tokens are stored as SHA-256 hashes, can be rotated/revoked, and are scoped to a bin or vehicle.
 - PostgreSQL/PostGIS Docker Compose environment, SQLAlchemy persistence, Alembic migrations and database readiness check.
 - Bin registry, vehicle registry, telemetry history, collection jobs, service events, route plans and operations summary.
+- Database-enforced one-open-job-per-bin invariant using a partial unique index on unverified collection jobs; the API returns a conflict for competing requests, and the migration refuses to proceed if existing duplicate open jobs need manual resolution.
 - Live telemetry ingestion with timezone validation, future-clock-skew rejection, configurable freshness checks, idempotent message handling and bin-scoped device authorization.
 - Historical telemetry CSV import with required-column validation, upload and row limits, deduplication, batch commit and explicit imported source labels.
 - Model artifact loading and an API endpoint for next-observation fill predictions when enough recent readings and temperature values are available.
