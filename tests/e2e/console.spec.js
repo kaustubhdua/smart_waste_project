@@ -242,7 +242,7 @@ test("operator bin form does not submit without required source and measured fie
   await page.getByRole("button", { name: "Create bin record" }).click();
   expect(createRequests).toBe(0);
   await expect(page.locator("#source")).toHaveValue("");
-  await expect(page.locator("#status")).toContainText(/Enter your locally configured operator token/);
+  await expect(page.locator("#status")).toContainText(/Enter your operator username and password/);
 });
 
 test("operator can import historical telemetry with multipart form data and honest provenance", async ({ page }) => {
