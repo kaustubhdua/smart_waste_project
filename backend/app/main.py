@@ -24,9 +24,9 @@ from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 from .priority import calculate_priority
 
-EXPECTED_SCHEMA_REVISION = "0008_operator_identity"
+EXPECTED_SCHEMA_REVISION = "0009_driver_action_idempotency"
 
-app = FastAPI(title="Smart Waste Operations API", version="1.3.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
+app = FastAPI(title="Smart Waste Operations API", version="1.4.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
 if settings.auto_create_schema:
     Base.metadata.create_all(bind=engine)
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'DELETE', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Bootstrap-Token', 'X-Device-Token', 'X-Driver-Id', 'X-Driver-Token'])
