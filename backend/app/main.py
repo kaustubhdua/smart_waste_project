@@ -213,7 +213,7 @@ def bootstrap_admin(payload: AuthBootstrap, x_bootstrap_token: str | None = Head
 
 @app.post("/api/v1/auth/login")
 def operator_login(payload: AuthLogin, response: Response, db: Session = Depends(get_db)):
-    user = db.scalar(select(OperatorUser).where(OperatorUser.username == payload.username))
+    user = db.scalar(select(OperatorUser).where(OperatorUser.username == payload.username).with_for_update())
     if user is None:
         verify_password(payload.password, _DUMMY_PASSWORD_HASH)
         raise HTTPException(status_code=401, detail="Invalid username or password")
@@ -261,7 +261,7 @@ def operator_logout(response: Response, principal: dict = Depends(get_current_op
 
 @app.post("/api/v1/auth/change-password", dependencies=[Depends(require_operator)])
 def change_operator_password(payload: AuthPasswordChange, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
-    user = db.get(OperatorUser, principal["user_id"])
+    user = db.scalar(select(OperatorUser).where(OperatorUser.id == principal["user_id"]).with_for_update())
     if not user or not user.active or not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     if payload.current_password == payload.new_password:
@@ -304,7 +304,7 @@ def create_operator_user(payload: OperatorUserCreate, principal: dict = Depends(
 
 @app.post("/api/v1/auth/users/{username}/revoke", dependencies=[Depends(require_admin)])
 def revoke_operator_user(username: str, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
-    user = db.scalar(select(OperatorUser).where(OperatorUser.username == username))
+    user = db.scalar(select(OperatorUser).where(OperatorUser.username == username).with_for_update())
     if not user:
         raise HTTPException(status_code=404, detail="Unknown operator account")
     if user.active and user.role == "admin":
