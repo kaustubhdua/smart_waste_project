@@ -113,7 +113,11 @@ def load_ml_model(model_path=MODEL_FILENAME):
     if not os.path.exists(model_path):
         return None
     artifact = joblib.load(model_path)
-    return artifact["model"] if isinstance(artifact, dict) and "model" in artifact else artifact
+    if not isinstance(artifact, dict) or "model" not in artifact:
+        raise ValueError("Legacy model artifact has no feature-schema metadata; retrain it with person2_ml_prediction.py")
+    if artifact.get("feature_schema_version") != FEATURE_SCHEMA_VERSION:
+        raise ValueError("Model artifact feature schema is incompatible; retrain it with person2_ml_prediction.py")
+    return artifact["model"]
 
 
 def predict_next_fill(model, rows):
