@@ -41,7 +41,8 @@ A full-stack waste-operations engineering prototype combining IoT telemetry, col
 - **Fuzzy prioritization:** a transparent three-input Sugeno inference engine combines fill level, time since verified emptying, and bin criticality.
 - **Route optimization:** OSRM road-distance matrices and route geometry combined with OR-Tools capacity-constrained vehicle routing.
 - **Transactional dispatch:** approved jobs are optimized against registered vehicles and assigned with route-plan history and service events.
-- **Operator console:** responsive map-based bin monitoring, telemetry summary, vehicle/job controls, route preview/dispatch, and optional model forecasts.
+- **Operator console:** responsive map-based bin monitoring, telemetry summary, vehicle/job controls, route preview/dispatch, optional model forecasts, and named-account sign-in with expiring sessions.
+- **Operator identity:** one-time initial-admin bootstrap, named admin/operator accounts, password hashing, session expiry/revocation, account lockout, password changes and security audit events.
 - **Driver workflow:** vehicle-scoped assigned stops, collection status changes, exception reporting, and external navigation handoff.
 - **ML demonstration:** feature engineering, Random Forest inference, chronological holdout evaluation and simple baselines. Forecast scope is deliberately limited to the next observed fill value.
 - **Engineering quality:** SQLAlchemy persistence, Alembic migrations, Docker Compose, API readiness checks, Python CI, CodeQL, and browser-driven operator/driver smoke tests.
@@ -87,7 +88,7 @@ The default stack starts with an empty database: it does not generate synthetic 
    ```
 
 5. Open the operator console at `http://localhost:8080`, API documentation at `http://localhost:8000/docs`, and health endpoints at `http://localhost:8000/health` and `/health/ready`.
-6. Enter the configured `API_TOKEN` in the operator console. The default configuration starts empty. To intentionally seed synthetic demonstration records, set `SEED_DEMO_DATA=true` in `.env` and restart; never treat those records as live sensor data.
+6. Create the first administrator once using `POST /api/v1/auth/bootstrap` with the `X-Bootstrap-Token` header set to your configured `API_TOKEN`, a unique username and a password of at least 12 characters. Then sign in to the operator console with that username/password. In production the bootstrap token is not accepted for normal API access. The default configuration starts empty. To intentionally seed synthetic demonstration records, set `SEED_DEMO_DATA=true` in `.env` and restart; never treat those records as live sensor data.
 
 When creating a bin through `POST /api/v1/bins`, explicitly set `source` to `live`, `imported`, or `demo`; the API rejects missing provenance rather than guessing. For real telemetry, enroll a device through `POST /api/v1/devices`, securely store the one-time `X-Device-Token`, and send readings to `POST /api/v1/telemetry` using its enrolled `device_id`, bound `bin_id`, unique `message_id`, calibrated `fill_percent`, and timezone-aware timestamp. Device credentials can be rotated or revoked.
 
@@ -104,18 +105,27 @@ Train the optional model artifact from the repository root with `python person2_
 
 ## How the workflow fits together
 
-1. **Observe:** devices submit validated telemetry; duplicate messages are handled idempotently and stale readings are surfaced.
-2. **Prioritize:** the platform scores collection candidates using a bounded, documented heuristic and recorded service history.
-3. **Prepare:** operators review jobs and register vehicle capacity/depot details.
-4. **Optimize:** approved jobs are routed using road-distance costs and vehicle capacity constraints.
-5. **Dispatch:** the API persists the route plan and assigns stops transactionally.
-6. **Collect:** drivers start, complete, or report an exception for their assigned stops.
-7. **Verify:** operators review completed jobs and service history; completed work releases vehicles for subsequent dispatch.
+1. **Authenticate:** operators sign in with named accounts; sessions expire, can be revoked, and are checked against admin/operator privileges.
+2. **Observe:** devices submit validated telemetry; duplicate messages are handled idempotently and stale readings are surfaced.
+3. **Prioritize:** a three-input zero-order Sugeno fuzzy inference engine combines fill level, elapsed service time and bin criticality. Its defaults require local field calibration.
+4. **Prepare:** operators review jobs and register vehicle capacity/depot details.
+5. **Optimize:** approved jobs are routed using road-distance costs and vehicle capacity constraints.
+6. **Dispatch:** the API persists the route plan and assigns stops transactionally.
+7. **Collect:** drivers start, complete, or report an exception for their assigned stops.
+8. **Verify:** operators review completed jobs and service history; completed work releases vehicles for subsequent dispatch.
 
 ## API overview
 
 | Method | Endpoint | Purpose |
 |---|---|---|
+| `POST` | `/api/v1/auth/bootstrap` | Create the initial administrator once |
+| `POST` | `/api/v1/auth/login` | Sign in and issue an eight-hour session |
+| `GET` | `/api/v1/auth/me` | Inspect current operator identity |
+| `POST` | `/api/v1/auth/logout` | Revoke current session |
+| `POST` | `/api/v1/auth/change-password` | Change password and revoke other sessions |
+| `GET/POST` | `/api/v1/auth/users` | List/create named accounts (admin only) |
+| `POST` | `/api/v1/auth/users/{username}/revoke` | Disable account and revoke sessions (admin only) |
+| `GET` | `/api/v1/auth/audit` | Inspect security audit events (admin only) |
 | `POST` | `/api/v1/bins` | Register a bin |
 | `GET` | `/api/v1/bins` | List active bins |
 | `POST` | `/api/v1/devices` | Enroll a device and issue its one-time token |
@@ -164,16 +174,17 @@ Browser tests run in GitHub Actions using Playwright Chromium. They mock API res
 
 The web container reverse-proxies `/api/*` and health/API documentation routes to the API over the private Compose network. Both browser views default to same-origin API access, so a hosted HTTPS deployment does not accidentally call `localhost` on each visitor's device. For an external API origin, configure it explicitly in the UI and set the API's trusted CORS origins accordingly.
 
-- Production startup rejects SQLite, weak/placeholder API tokens, automatic schema creation, demo seeding, unsafe CORS settings, and the public demo OSRM router.
+- Production startup rejects SQLite, weak/placeholder bootstrap secrets, automatic schema creation, demo seeding, unsafe CORS settings, and the public demo OSRM router.
+- Named operator/admin accounts use salted PBKDF2 password hashes, eight-hour opaque sessions stored as hashes, account lockout, account/session revocation, and audit events. The shared API_TOKEN is a one-time bootstrap secret in production and remains a local-development compatibility credential only.
 - Nginx adds browser security headers and a Content Security Policy. Operator and driver JavaScript is served from same-origin files, so `script-src` does not allow `unsafe-inline`. Inline styles still require `unsafe-inline` and remain a hardening opportunity.
-- The operator API currently uses a shared bearer token. This is not multi-user identity or role-based authorization.
+- Application-level admin/operator roles are implemented, but external SSO/OAuth, MFA, ingress-level distributed rate limiting, and a formal penetration test remain outstanding.
 - Use a contracted or self-hosted routing service for deployment. The public OSRM demo service is for development only.
 - Before public exposure, configure managed secrets, HTTPS/TLS, private database networking, rate limits, logs/alerts, automated encrypted backups and a tested restore procedure.
 - Follow the [production operations runbook](docs/PRODUCTION_RUNBOOK.md) and [release acceptance checklist](docs/RELEASE_CHECKLIST.md). Do not mark unchecked acceptance gates complete without evidence.
 
 ## Known limitations
 
-- The current operator authentication is a shared token; identity-based roles, per-user revocation and a complete audit trail remain to be implemented.
+- The operator identity foundation is implemented; external identity federation/MFA, distributed ingress rate limiting and formal security testing remain outstanding.
 - No physical sensor, calibration process, municipal pilot, or real operational savings claim has been validated.
 - The optional ML artifact predicts the next observed fill value rather than a calibrated 6/12-hour forecast. Keep model-assisted dispatch disabled until field evaluation supports it.
 - Offline driver actions and turn-by-turn navigation are not implemented.
