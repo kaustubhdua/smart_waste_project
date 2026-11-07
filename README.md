@@ -172,10 +172,10 @@ Browser tests run in GitHub Actions using Playwright Chromium. They mock API res
 
 ## Security and deployment
 
-The web container reverse-proxies `/api/*` and health/API documentation routes to the API over the private Compose network. Both browser views default to same-origin API access, so a hosted HTTPS deployment does not accidentally call `localhost` on each visitor's device. For an external API origin, configure it explicitly in the UI and set the API's trusted CORS origins accordingly.
+The web container reverse-proxies `/api/*` and health/API documentation routes to the API over the private Compose network. Both browser views default to same-origin API access, so a hosted HTTPS deployment does not accidentally call `localhost` on each visitor's device. Keep the browser console and API same-origin for first-party cookie authentication. Non-browser integrations should use a separately managed bearer credential; do not store browser sessions in JavaScript storage.
 
 - Production startup rejects SQLite, weak/placeholder bootstrap secrets, automatic schema creation, demo seeding, unsafe CORS settings, and the public demo OSRM router.
-- Named operator/admin accounts use salted PBKDF2 password hashes, eight-hour opaque sessions stored as hashes, account lockout, account/session revocation, and audit events. The shared API_TOKEN is a one-time bootstrap secret in production and remains a local-development compatibility credential only.
+- Named operator/admin accounts use salted PBKDF2 password hashes, eight-hour HttpOnly/SameSite=Strict browser cookies (Secure in production), opaque session hashes, account lockout, account/session revocation, password-change session rotation, and audit events. Cookie-authenticated state changes validate the request Origin; browser credentials are never exposed to JavaScript storage. The shared API_TOKEN is a one-time bootstrap secret in production and remains a local-development compatibility credential only.
 - Nginx adds browser security headers and a Content Security Policy. Operator and driver JavaScript is served from same-origin files, so `script-src` does not allow `unsafe-inline`. Inline styles still require `unsafe-inline` and remain a hardening opportunity.
 - Application-level admin/operator roles are implemented, but external SSO/OAuth, MFA, ingress-level distributed rate limiting, and a formal penetration test remain outstanding.
 - Use a contracted or self-hosted routing service for deployment. The public OSRM demo service is for development only.
