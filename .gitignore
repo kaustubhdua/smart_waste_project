@@ -16,3 +16,6 @@ cleaned_waste_data.csv
 .pytest_cache/
 .coverage
 htmlcov/
+node_modules/
+test-results/
+playwright-report/

@@ -249,6 +249,24 @@ def test_job_demand_cannot_exceed_bin_capacity():
     response = client.post("/api/v1/jobs", json={"bin_id":"bin-capacity","demand_liters":101}, headers=OP)
     assert response.status_code == 422
 
+def test_second_open_job_for_the_same_bin_is_rejected_until_the_first_is_verified():
+    b = {"id":"bin-dup","latitude":28.6,"longitude":77.2,"capacity_liters":100,"criticality":2,"source":"demo"}
+    assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
+    first = client.post("/api/v1/jobs", json={"bin_id":"bin-dup","demand_liters":50}, headers=OP)
+    assert first.status_code == 201
+    job_id = first.json()["id"]
+    duplicate = client.post("/api/v1/jobs", json={"bin_id":"bin-dup","demand_liters":50}, headers=OP)
+    assert duplicate.status_code == 409
+    assert job_id in duplicate.json()["detail"]
+    assert len(client.get("/api/v1/jobs", headers=OP).json()) == 1
+    assert client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"approved","actor":"t"}, headers=OP).status_code == 200
+    vehicle = {"id":"truck-dup","capacity_liters":500,"depot_latitude":28.6,"depot_longitude":77.2}
+    assert client.post("/api/v1/vehicles", json=vehicle, headers=OP).status_code == 201
+    assert client.post(f"/api/v1/jobs/{job_id}/assign", json={"vehicle_id":"truck-dup","actor":"dispatcher"}, headers=OP).status_code == 200
+    for status in ("in_progress", "completed", "verified"):
+        assert client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":status,"actor":"t"}, headers=OP).status_code == 200
+    assert client.post("/api/v1/jobs", json={"bin_id":"bin-dup","demand_liters":50}, headers=OP).status_code == 201
+
 def test_cors_allows_driver_auth_headers():
     response = client.options(
         "/api/v1/driver/jobs",
