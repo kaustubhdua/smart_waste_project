@@ -2,7 +2,7 @@
 
 ## Scope and honest status
 
-This document identifies security boundaries for the Smart Waste Collection Platform. It is not a penetration-test report or certification. The current operator API uses one shared bearer token; that is a prototype boundary and must not be represented as multi-user authentication or role-based access control.
+This document identifies security boundaries for the Smart Waste Collection Platform. It is not a penetration-test report or certification. The operator API now supports named admin/operator accounts, salted PBKDF2 password hashes, eight-hour opaque sessions stored as SHA-256 hashes, account lockout after repeated failures, account/session revocation, administrator-only user/device/driver credential management, and security audit events. This is an application-level identity foundation, not a third-party identity provider or penetration-test certification.
 
 ## Assets
 
@@ -28,7 +28,7 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 
 | Threat | Impact | Required controls / verification |
 |---|---|---|
-| Shared operator token is leaked | Any holder may perform operator actions | Replace with managed identity and per-user RBAC; short-lived sessions/tokens, revocation, rate limits, MFA where supported; test each role against every protected route |
+| Bootstrap secret is leaked or initial admin compromised | Attacker may create the first administrator or gain privileged access | Keep API_TOKEN in a secret manager, use one-time bootstrap only, create named users, rotate bootstrap secret, enforce TLS, apply ingress rate limiting and MFA through an identity provider; verify bootstrap cannot be repeated |
 | Device token theft or replay | False readings or data tampering for a bin | TLS, per-device scope, rotation/revocation, idempotency, anomaly detection, rate limits, clock validation; test revoked and cross-bin credentials |
 | Driver credential misuse | Unauthorized job transitions or operational disruption | Short-lived driver identity, vehicle-scoped authorization, revocation, audit events; test cross-driver and cross-vehicle access |
 | Public API/database exposure | Data theft or service compromise | Private network, TLS ingress, no public DB port, firewall/security groups, secure headers, deployment scan |
@@ -43,7 +43,9 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 
 ## Minimum security test matrix
 
-- [ ] Missing, malformed, incorrect, expired, and revoked credentials are rejected.
+- [x] Missing, malformed, incorrect, expired, and revoked operator sessions are rejected by automated tests.
+- [x] Admin/operator privilege boundaries, account disablement, one-time bootstrap and last-admin protection are covered by automated tests.
+- [ ] Ingress-level distributed rate limiting, MFA/SSO, and a formal penetration test remain outstanding.
 - [ ] Every role is tested against read/write/delete/dispatch/verification/export endpoints.
 - [ ] Device A cannot submit telemetry for Bin B.
 - [ ] Driver A cannot read or transition Driver B's vehicle jobs.
@@ -56,4 +58,4 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 
 ## Release decision
 
-Do not expose the system to public or municipal operations until the shared operator credential limitation is resolved, the deployment boundary is reviewed, and all P0 gates in [the release checklist](RELEASE_CHECKLIST.md) have evidence. Hardware readiness, model quality, and operational savings require real-world evidence and cannot be proven by source code or CI alone.
+Do not expose the system to public or municipal operations until bootstrap secret handling, ingress rate limiting, MFA/SSO decision, deployment boundary review, and all P0 gates in [the release checklist](RELEASE_CHECKLIST.md) have evidence. Hardware readiness, model quality, and operational savings require real-world evidence and cannot be proven by source code or CI alone.
