@@ -1,7 +1,7 @@
 # Implementation status and honest limitations
 
 ## Implemented capabilities
-- FastAPI API with named operator/admin accounts, salted PBKDF2 password hashes, one-time initial-admin bootstrap, eight-hour opaque sessions stored as SHA-256 hashes, account lockout after eight failed attempts, session/account revocation, last-admin protection, and security audit events. Shared API_TOKEN authentication is retained only for non-production compatibility; production operator endpoints require named sessions.
+- FastAPI API with named operator/admin accounts, salted PBKDF2 password hashes, one-time initial-admin bootstrap, eight-hour HttpOnly/SameSite browser cookies (Secure in production), with opaque session tokens stored only as SHA-256 hashes server-side, account lockout after eight failed attempts, session/account revocation, last-admin protection, and security audit events. Shared API_TOKEN authentication is retained only for non-production compatibility; production operator endpoints require named sessions.
 - Administrator-only user provisioning, account revocation, audit-log access, device credential enrollment/rotation/revocation and driver credential management; operator sessions cannot perform administrator-only credential actions.
 - PostgreSQL/PostGIS Docker Compose environment, SQLAlchemy persistence, Alembic migrations and database readiness check.
 - Bin registry, vehicle registry, telemetry history, collection jobs, service events, route plans and operations summary.
