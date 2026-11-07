@@ -1,7 +1,7 @@
 # Implementation status and honest limitations
 
 ## Implemented capabilities
-- FastAPI API with named operator/admin accounts, salted PBKDF2 password hashes, one-time initial-admin bootstrap, eight-hour HttpOnly/SameSite browser cookies (Secure in production), with opaque session tokens stored only as SHA-256 hashes server-side, account lockout after eight failed attempts, session/account revocation, last-admin protection, and security audit events. Shared API_TOKEN authentication is retained only for non-production compatibility; production operator endpoints require named sessions.
+- FastAPI API with named operator/admin accounts, salted PBKDF2 password hashes, one-time initial-admin bootstrap, eight-hour HttpOnly/SameSite=Strict browser cookies (Secure in production), with opaque session tokens stored only as SHA-256 hashes server-side, Origin validation on cookie-authenticated mutations, account lockout after eight failed attempts, session/account revocation, serialized last-admin protection, password-change session rotation, and security audit events. Shared API_TOKEN authentication is retained only for non-production compatibility; production operator endpoints require named sessions.
 - Administrator-only user provisioning, account revocation, audit-log access, device credential enrollment/rotation/revocation and driver credential management; operator sessions cannot perform administrator-only credential actions.
 - PostgreSQL/PostGIS Docker Compose environment, SQLAlchemy persistence, Alembic migrations and database readiness check.
 - Bin registry, vehicle registry, telemetry history, collection jobs, service events, route plans and operations summary.
@@ -21,7 +21,7 @@
 - Pinned dependencies, backend API/optimizer tests, original Python tests, migration checks, browser JavaScript syntax checks, container builds and Compose runtime smoke tests.
 
 ## Still required before production
-- Application-level admin/operator identity and session management are implemented, but this is not external SSO/OAuth, MFA, or enterprise identity federation. Add ingress-level distributed rate limiting, MFA/SSO where required, a documented bootstrap-secret rotation procedure, and a formal authorization review before public exposure.
+- Application-level admin/operator identity and session management are implemented, but this is not external SSO/OAuth, MFA, or enterprise identity federation. Add ingress-level distributed rate limiting beyond the included Nginx per-IP login/bootstrap limit, MFA/SSO where required, a documented bootstrap-secret rotation procedure, and a formal authorization review before public exposure.
 - Public OSRM is a development dependency with usage limits and no service guarantee; use a contracted or self-hosted routing service for deployment.
 - The model predicts the next observed fill value; it is not a calibrated 6/12-hour forecast. Its current evaluation is based on the repository dataset and does not establish field accuracy. Temperature readings and roughly hourly recent observations are required.
 - Model-assisted demand is disabled by default. Do not enable USE_MODEL_FOR_DISPATCH until model evaluation on representative real sensor data supports the change.
