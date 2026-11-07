@@ -66,7 +66,10 @@ def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
         return None, "model_artifact_missing"
     if artifact.get("feature_schema_version") != MODEL_FEATURE_SCHEMA_VERSION:
         return None, "model_feature_schema_mismatch"
-    rows = list(db.scalars(select(Telemetry).where(Telemetry.bin_id == bin_row.id).order_by(Telemetry.measured_at.desc()).limit(6)))
+    # Six hours at the supported 30-minute minimum cadence can contain
+    # thirteen readings. Fetch enough history to construct the same true
+    # time-based window used during training.
+    rows = list(db.scalars(select(Telemetry).where(Telemetry.bin_id == bin_row.id).order_by(Telemetry.measured_at.desc()).limit(50)))
     rows.reverse()
     if not rows:
         return None, "insufficient_history"
@@ -95,9 +98,10 @@ def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
         "hour": timestamp.hour,
         "day_of_week": timestamp.weekday(),
         "is_weekend": int(timestamp.weekday() >= 5),
-        "fill_lag_1h": latest.fill_percent,
+        "fill_lag_1h": recent_rows[-2].fill_percent,
         "fill_lag_3h": recent_rows[-4].fill_percent,
-        "rolling_mean_6h": mean(row.fill_percent for row in recent_rows),
+        # Training excludes the current observation from this six-hour window.
+        "rolling_mean_6h": mean(row.fill_percent for row in recent_rows[:-1]),
     }
     feature_names = artifact.get("features", MODEL_FEATURES)
     if (
