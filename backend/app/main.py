@@ -2,6 +2,7 @@ from datetime import datetime, timezone, timedelta
 import csv
 import io
 from pathlib import Path
+from math import asin, cos, radians, sin, sqrt
 from statistics import mean
 import joblib
 import pandas as pd
@@ -10,9 +11,9 @@ from hmac import compare_digest
 from hashlib import sha256
 from secrets import token_urlsafe
 from uuid import uuid4
-from fastapi import FastAPI, Depends, Header, Cookie, HTTPException, UploadFile, File, Response, Request
+from fastapi import FastAPI, Depends, Header, Cookie, HTTPException, UploadFile, File, Response, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .auth import hash_password, verify_password, hash_session_token
@@ -354,6 +355,72 @@ def create_bin(payload: BinCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(row)
     return row
+
+@app.get("/api/v1/bins/nearby", dependencies=[Depends(require_operator)])
+def nearby_bins(
+    latitude: float = Query(..., ge=-90, le=90),
+    longitude: float = Query(..., ge=-180, le=180),
+    radius_meters: float = Query(1000, gt=0, le=50000),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """Find active bins within a radius; use the PostGIS GiST index on PostgreSQL."""
+    if db.get_bind().dialect.name == "postgresql":
+        point = "ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography"
+        location = "ST_SetSRID(ST_MakePoint(b.longitude, b.latitude), 4326)::geography"
+        rows = db.execute(
+            text(
+                f"SELECT b.id, ST_Distance({location}, {point}) AS distance_meters "
+                f"FROM bins AS b WHERE b.active IS TRUE "
+                f"AND ST_DWithin({location}, {point}, :radius_meters) "
+                "ORDER BY distance_meters ASC, b.id ASC LIMIT :limit"
+            ),
+            {
+                "latitude": latitude,
+                "longitude": longitude,
+                "radius_meters": radius_meters,
+                "limit": limit,
+            },
+        ).all()
+        distances = {row.id: float(row.distance_meters) for row in rows}
+        ids = [row.id for row in rows]
+        bins_by_id = {
+            row.id: row
+            for row in db.scalars(select(Bin).where(Bin.id.in_(ids)))
+        } if ids else {}
+        ordered = [(bins_by_id[bin_id], distances[bin_id]) for bin_id in ids if bin_id in bins_by_id]
+    else:
+        # SQLite test/dev fallback; production PostgreSQL uses indexed PostGIS.
+        origin_lat, origin_lon = radians(latitude), radians(longitude)
+        ordered = []
+        for row in db.scalars(select(Bin).where(Bin.active.is_(True))):
+            target_lat, target_lon = radians(row.latitude), radians(row.longitude)
+            delta_lat, delta_lon = target_lat - origin_lat, target_lon - origin_lon
+            haversine = (
+                sin(delta_lat / 2) ** 2
+                + cos(origin_lat) * cos(target_lat) * sin(delta_lon / 2) ** 2
+            )
+            distance = 2 * 6_371_008.8 * asin(min(1.0, sqrt(haversine)))
+            if distance <= radius_meters:
+                ordered.append((row, distance))
+        ordered.sort(key=lambda item: (item[1], item[0].id))
+        ordered = ordered[:limit]
+    return [
+        {
+            "id": row.id,
+            "latitude": row.latitude,
+            "longitude": row.longitude,
+            "capacity_liters": row.capacity_liters,
+            "criticality": row.criticality,
+            "active": row.active,
+            "source": row.source,
+            "last_emptied_at": row.last_emptied_at,
+            "created_at": row.created_at,
+            "distance_meters": round(distance, 2),
+        }
+        for row, distance in ordered
+    ]
+
 
 @app.get("/api/v1/bins", response_model=list[BinOut], dependencies=[Depends(require_operator)])
 def list_bins(db: Session = Depends(get_db)):
