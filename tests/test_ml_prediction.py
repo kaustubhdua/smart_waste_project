@@ -26,6 +26,13 @@ class PredictionTests(unittest.TestCase):
             self.assertTrue(((predictions >= 0) & (predictions <= 100)).all())
 
 
+    def test_load_rejects_legacy_model_artifacts_without_feature_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "legacy.pkl"
+            joblib.dump({"model": object(), "features": ["old_feature"]}, artifact)
+            with self.assertRaisesRegex(ValueError, "feature schema"):
+                load_ml_model(str(artifact))
+
     def test_training_rejects_two_hour_next_observation_intervals(self):
         raw = generate_synthetic_bin_data(num_bins=3, days=5, seed=9)
         frame = preprocess_data(raw)
