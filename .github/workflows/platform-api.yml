@@ -73,6 +73,13 @@ jobs:
           # Verify the browser-facing Nginx service proxies to the API on the private Compose network.
           curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
           curl --fail --silent --show-error -H "Authorization: Bearer ci-only-operator-token" http://127.0.0.1:8080/api/v1/operations/summary
+          # The production PostgreSQL image must enable PostGIS and create the functional GiST index.
+          docker compose exec -T db psql -U smartwaste -d smartwaste -tAc "SELECT extname FROM pg_extension WHERE extname='postgis'" | grep -qx postgis
+          docker compose exec -T db psql -U smartwaste -d smartwaste -tAc "SELECT indexname FROM pg_indexes WHERE indexname='ix_bins_geography_gist'" | grep -qx ix_bins_geography_gist
+          # Exercise the actual PostGIS radius query through the same-origin web proxy.
+          curl --fail --silent --show-error -X POST http://127.0.0.1:8080/api/v1/bins -H "Authorization: Bearer ci-only-operator-token" -H "Content-Type: application/json" -d '{"id":"ci-near-center","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}'
+          curl --fail --silent --show-error -X POST http://127.0.0.1:8080/api/v1/bins -H "Authorization: Bearer ci-only-operator-token" -H "Content-Type: application/json" -d '{"id":"ci-nearby","latitude":28.601,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}'
+          curl --fail --silent --show-error -G http://127.0.0.1:8080/api/v1/bins/nearby --data-urlencode latitude=28.6 --data-urlencode longitude=77.2 --data-urlencode radius_meters=500 -H "Authorization: Bearer ci-only-operator-token" | jq -e 'length == 2 and .[0].id == "ci-near-center" and .[1].id == "ci-nearby" and .[1].distance_meters > 100 and .[1].distance_meters < 120'
           curl --fail --silent --show-error http://127.0.0.1:8080/ > /dev/null
           curl --fail --silent --show-error http://127.0.0.1:8080/driver.html > /dev/null
           headers="$(curl --fail --silent --show-error -I http://127.0.0.1:8080/)"
