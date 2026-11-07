@@ -10,7 +10,7 @@ from hmac import compare_digest
 from hashlib import sha256
 from secrets import token_urlsafe
 from uuid import uuid4
-from fastapi import FastAPI, Depends, Header, Cookie, HTTPException, UploadFile, File, Response
+from fastapi import FastAPI, Depends, Header, Cookie, HTTPException, UploadFile, File, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
@@ -117,6 +117,7 @@ def _audit(db: Session, actor_user_id: str | None, action: str, subject: str = "
 def get_current_operator(
     authorization: str | None = Header(default=None),
     wasteops_session: str | None = Cookie(default=None),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     raw_token = (
@@ -126,6 +127,11 @@ def get_current_operator(
     )
     if not raw_token:
         raise HTTPException(status_code=401, detail="Operator sign-in required")
+    if wasteops_session and request and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        origin = request.headers.get("origin")
+        allowed_origins = {value.strip() for value in settings.cors_origins.split(",") if value.strip()}
+        if not origin or origin not in allowed_origins:
+            raise HTTPException(status_code=403, detail="Cross-origin browser mutation rejected")
     configured = settings.api_token
     placeholder = configured.strip() != configured or not configured.strip() or any(character.isspace() for character in configured) or configured.lower().startswith(("change-me", "replace-with"))
     # Shared bootstrap token remains available only for local development and tests.
