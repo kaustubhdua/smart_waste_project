@@ -305,7 +305,7 @@ test("operator can sign in with a named account, use an expiring session and sig
     observed.push(route.request().headers()["authorization"]);
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
-  await page.route("**/api/v1/jobs?limit=100", async route => {
+  await page.route("**/api/v1/jobs**", async route => {
     observed.push(route.request().headers()["authorization"]);
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
