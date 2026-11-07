@@ -48,7 +48,7 @@ test("driver can view cached stops and safely sync an offline action once", asyn
   await context.setOffline(true);
   await expect(page.locator("#connection")).toContainText(/Offline/i);
   await page.getByRole("button", { name: "Start stop" }).click();
-  await expect(page.getByRole("status")).toContainText(/Saved in_progress locally/i);
+  await expect(page.locator("#status")).toContainText(/Saved in_progress locally/i);
   await expect(page.locator("#pendingActions")).toContainText("IN_PROGRESS");
   expect(transitionRequests).toBe(0);
 
