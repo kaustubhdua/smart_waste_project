@@ -598,12 +598,12 @@ def test_production_readiness_reports_current_schema_and_pending_bootstrap(monke
     monkeypatch.setattr(settings, "app_env", "production")
     with SessionLocal() as db:
         db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
-        db.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0008_operator_identity')"))
+        db.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0009_driver_action_idempotency')"))
         db.commit()
     try:
         response = client.get("/health/ready")
         assert response.status_code == 200, response.text
-        assert response.json()["schema_revision"] == "0008_operator_identity"
+        assert response.json()["schema_revision"] == "0009_driver_action_idempotency"
         assert response.json()["operator_auth"] == "named_sessions"
         assert response.json()["bootstrap_status"] == "pending"
     finally:
