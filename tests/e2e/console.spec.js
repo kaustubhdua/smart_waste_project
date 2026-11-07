@@ -242,7 +242,7 @@ test("operator bin form does not submit without required source and measured fie
   await page.getByRole("button", { name: "Create bin record" }).click();
   expect(createRequests).toBe(0);
   await expect(page.locator("#source")).toHaveValue("");
-  await expect(page.locator("#status")).toContainText(/Enter your operator username and password/);
+  await expect(page.locator("#status")).toContainText(/Sign in with your named operator account/);
 });
 
 test("operator can import historical telemetry with multipart form data and honest provenance", async ({ page }) => {
@@ -332,8 +332,8 @@ test("operator can sign in with a named account, use an expiring session and sig
   await expect(page.locator("#operatorUsersPanel")).toBeHidden();
   await expect(page.locator("#passwordPanel")).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
-  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBeNull();
   await expect(page.getByRole("status")).toContainText(/Signed out/i);
+  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBeNull();
 });
 
 
