@@ -127,7 +127,10 @@ def get_current_operator(
     )
     if not raw_token:
         raise HTTPException(status_code=401, detail="Operator sign-in required")
-    if wasteops_session and request and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+    uses_cookie_session = bool(wasteops_session) and not (
+        authorization and authorization.startswith("Bearer ")
+    )
+    if uses_cookie_session and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
         origin = request.headers.get("origin")
         allowed_origins = {value.strip() for value in settings.cors_origins.split(",") if value.strip()}
         if not origin or origin not in allowed_origins:
