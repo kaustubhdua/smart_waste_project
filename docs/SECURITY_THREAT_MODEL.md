@@ -51,7 +51,7 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 - [ ] Every role is tested against read/write/delete/dispatch/verification/export endpoints.
 - [ ] Device A cannot submit telemetry for Bin B.
 - [ ] Driver A cannot read or transition Driver B's vehicle jobs.
-- [x] Replaying the same driver action key returns the original result without a second service event; reusing the key with a different payload is rejected.
+- [ ] Replaying the same driver action key returns the original result without a second service event; reusing the key with a different payload is rejected.
 - [ ] Cross-origin requests are limited to explicitly trusted HTTPS origins.
 - [ ] Oversized CSV, malformed values, timestamp skew, duplicate IDs, and invalid transitions fail safely.
 - [ ] Parallel dispatch attempts cannot assign a job or vehicle inconsistently.
