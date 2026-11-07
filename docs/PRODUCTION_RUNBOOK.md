@@ -4,13 +4,15 @@ This runbook is an operator checklist, not evidence that the project has already
 
 ## 1. Release boundary
 
-Do not use this prototype for unsupervised municipal operations until all P0 gates in [the release checklist](RELEASE_CHECKLIST.md) have evidence. In particular, the current operator authentication is a shared bearer token, and the public OSRM endpoint is for development only.
+Do not use this prototype for unsupervised municipal operations until all P0 gates in [the release checklist](RELEASE_CHECKLIST.md) have evidence. Operator access now supports named accounts, role checks, expiring sessions and administrator-driven revocation. Production bootstrap credentials must remain private, and the public OSRM endpoint is still for development only.
 
 ## 2. Environment and secrets
 
 - Use a dedicated production environment and a durable managed PostgreSQL/PostGIS database.
 - Store `POSTGRES_PASSWORD` and `API_TOKEN` in a managed secret store; never commit `.env`, tokens, database URLs or device credentials.
-- Use a unique operator token of at least 32 characters as a temporary deployment guardrail only; this does not replace identity-based authentication and role permissions.
+- Use `API_TOKEN` as a unique bootstrap secret of at least 32 characters. Use it once to create the first administrator, then keep it in the secret manager for controlled recovery; it is not accepted as a normal production operator credential.
+- Before opening the service, apply migrations through revision `0008_operator_identity`, bootstrap the first administrator over a trusted administrative network, sign in with the named account, and create named operator accounts. Verify the bootstrap endpoint refuses a second initialization.
+- Operator sessions expire after eight hours, are stored as hashes, and can be revoked by disabling the account. Eight consecutive failed password attempts trigger a 15-minute account lock. Put login behind ingress-level rate limiting as an additional distributed abuse control.
 - Set `APP_ENV=production`, `AUTO_CREATE_SCHEMA=false`, `SEED_DEMO_DATA=false`, explicit trusted HTTPS `CORS_ORIGINS`, and a contracted or self-hosted HTTPS routing provider in `OSRM_BASE_URL`.
 - Keep database and application ports private. Terminate TLS at a maintained reverse proxy or managed ingress; configure security headers, request-size limits, timeouts and access logs.
 - Use a staging environment to rehearse migrations and releases before production.
