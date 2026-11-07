@@ -1,5 +1,6 @@
 from datetime import datetime, timezone, timedelta
 import csv
+import json
 import io
 from pathlib import Path
 from statistics import mean
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 from .auth import hash_password, verify_password, hash_session_token
 from .config import settings
 from .db import Base, engine, get_db
-from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device, Driver, OperatorUser, OperatorSession, OperatorAuditEvent, OperatorBootstrap
+from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device, Driver, OperatorUser, OperatorSession, OperatorAuditEvent, OperatorBootstrap, DriverAction
 from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate, DriverCreate, DriverTransition, AuthBootstrap, AuthLogin, OperatorUserCreate, AuthPasswordChange
 from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
@@ -785,11 +786,28 @@ def driver_jobs(x_driver_id: str | None = Header(default=None), x_driver_token: 
     return result
 
 @app.post("/api/v1/driver/jobs/{job_id}/transition")
-def driver_transition(job_id: str, payload: DriverTransition, x_driver_id: str | None = Header(default=None), x_driver_token: str | None = Header(default=None), db: Session = Depends(get_db)):
+def driver_transition(
+    job_id: str,
+    payload: DriverTransition,
+    x_driver_id: str | None = Header(default=None),
+    x_driver_token: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+):
     driver = _driver_auth(x_driver_id, x_driver_token, db)
+    key = idempotency_key or str(uuid4())
+    if len(key) < 16 or len(key) > 128 or any(character.isspace() for character in key):
+        raise HTTPException(422, "Idempotency-Key must be 16–128 non-whitespace characters")
+
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
     if not job:
         raise HTTPException(404, "Unknown job")
+    existing = db.get(DriverAction, key)
+    if existing:
+        if existing.driver_id != driver.id or existing.job_id != job_id or existing.action != payload.status:
+            raise HTTPException(409, "Idempotency-Key was already used for a different driver action")
+        return json.loads(existing.response_json)
+
     if job.assigned_vehicle_id != driver.vehicle_id:
         raise HTTPException(403, "Job is not assigned to this driver's vehicle")
     if payload.status not in ALLOWED.get(job.status, set()) or payload.status not in {"in_progress", "completed", "exception"}:
@@ -804,8 +822,23 @@ def driver_transition(job_id: str, payload: DriverTransition, x_driver_id: str |
     if payload.status == "exception":
         _release_vehicle_if_idle(db, driver.vehicle_id)
     db.add(ServiceEvent(job_id=job.id, actor="driver:" + driver.id, previous_status=previous, new_status=payload.status, note=payload.note))
-    db.commit()
-    return {"id": job.id, "previous_status": previous, "status": job.status}
+    response = {"id": job.id, "previous_status": previous, "status": job.status}
+    db.add(DriverAction(
+        idempotency_key=key,
+        driver_id=driver.id,
+        job_id=job.id,
+        action=payload.status,
+        response_json=json.dumps(response),
+    ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.get(DriverAction, key)
+        if existing and existing.driver_id == driver.id and existing.job_id == job_id and existing.action == payload.status:
+            return json.loads(existing.response_json)
+        raise HTTPException(409, "Driver action idempotency conflict")
+    return response
 
 @app.post("/api/v1/routes/dispatch", dependencies=[Depends(require_operator)])
 async def dispatch_approved_jobs(payload: DispatchRequest, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
