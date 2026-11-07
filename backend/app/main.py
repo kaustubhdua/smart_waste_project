@@ -283,8 +283,15 @@ def revoke_operator_user(username: str, principal: dict = Depends(get_current_op
     if not user:
         raise HTTPException(status_code=404, detail="Unknown operator account")
     if user.active and user.role == "admin":
-        active_admins = int(db.scalar(select(func.count()).select_from(OperatorUser).where(OperatorUser.active.is_(True), OperatorUser.role == "admin")) or 0)
-        if active_admins <= 1:
+        # Lock the active-admin set so concurrent revocations cannot each
+        # observe two admins and leave the system with none.
+        active_admin_ids = list(db.scalars(
+            select(OperatorUser.id)
+            .where(OperatorUser.active.is_(True), OperatorUser.role == "admin")
+            .order_by(OperatorUser.id)
+            .with_for_update()
+        ))
+        if user.id in active_admin_ids and len(active_admin_ids) <= 1:
             raise HTTPException(status_code=409, detail="Cannot revoke the last active administrator")
     user.active = False
     now = datetime.now(timezone.utc)
