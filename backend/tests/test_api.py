@@ -230,8 +230,9 @@ def test_forecast_endpoint_uses_loaded_artifact_and_real_hourly_history(monkeypa
         def predict(self, frame):
             assert list(frame.columns) == main_module.MODEL_FEATURES
             assert frame.iloc[0]["temperature_c"] == 25.0
+            assert frame.iloc[0]["fill_lag_1h"] == 30
             assert frame.iloc[0]["fill_lag_3h"] == 20
-            assert frame.iloc[0]["rolling_mean_6h"] == 27.5
+            assert frame.iloc[0]["rolling_mean_6h"] == 25.0
             return [67.5]
 
     b = {"id":"bin-forecast","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":3,"source":"live"}
