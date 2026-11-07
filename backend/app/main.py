@@ -252,7 +252,8 @@ def revoke_operator_user(username: str, principal: dict = Depends(get_current_op
 def list_operator_audit(limit: int = 100, db: Session = Depends(get_db)):
     rows = db.scalars(select(OperatorAuditEvent).order_by(OperatorAuditEvent.created_at.desc()).limit(max(1, min(limit, 500))))
     return [{"id": row.id, "actor_user_id": row.actor_user_id, "action": row.action, "subject": row.subject, "created_at": row.created_at} for row in rows]
-\n@app.get("/health")
+
+@app.get("/health")
 def health():
     return {"status": "ok", "service": "smart-waste-api"}
 
