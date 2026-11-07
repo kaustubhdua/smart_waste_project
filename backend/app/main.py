@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 import csv
 import io
-from math import exp
 from pathlib import Path
 from statistics import mean
 import joblib
@@ -22,6 +21,7 @@ from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehi
 from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate, DriverCreate, DriverTransition
 from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
+from .priority import calculate_priority
 
 app = FastAPI(title="Smart Waste Operations API", version="1.1.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
 if settings.auto_create_schema:
@@ -36,13 +36,14 @@ def _is_stale(measured_at: datetime) -> bool:
     return age_seconds > settings.telemetry_stale_after_minutes * 60 or age_seconds < -settings.telemetry_future_skew_seconds
 
 def _priority_score(fill_percent: float, bin_row: Bin) -> float:
+    """Calculate urgency with the shared Sugeno fuzzy inference engine."""
     hours_elapsed = 0.0
     if bin_row.last_emptied_at is not None:
-        hours_elapsed = max(0.0, (datetime.now(timezone.utc) - _utc(bin_row.last_emptied_at)).total_seconds() / 3600)
-    fill_weight = 1.0 / (1.0 + exp(-0.1 * (min(100.0, max(0.0, fill_percent)) - 65.0)))
-    time_weight = min(hours_elapsed / 48.0, 1.0)
-    criticality_multiplier = {1: 0.8, 2: 0.9, 3: 1.0, 4: 1.15, 5: 1.3}.get(bin_row.criticality, 1.0)
-    return round(min(100.0, max(0.0, (70.0 * fill_weight + 30.0 * time_weight) * criticality_multiplier)), 2)
+        hours_elapsed = max(
+            0.0,
+            (datetime.now(timezone.utc) - _utc(bin_row.last_emptied_at)).total_seconds() / 3600,
+        )
+    return calculate_priority(fill_percent, hours_elapsed, bin_row.criticality)
 
 MODEL_FEATURES = ["capacity_liters", "temperature_c", "hour", "day_of_week", "is_weekend", "fill_lag_1h", "fill_lag_3h", "rolling_mean_6h"]
 
