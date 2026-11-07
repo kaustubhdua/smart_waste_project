@@ -98,9 +98,12 @@ def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
         "rolling_mean_6h": mean(row.fill_percent for row in recent_rows),
     }
     feature_names = artifact.get("features", MODEL_FEATURES)
-    missing = set(feature_names).difference(feature_row)
-    if missing:
-        raise ValueError(f"Model expects unsupported features: {sorted(missing)}")
+    if (
+        not isinstance(feature_names, list)
+        or len(feature_names) != len(MODEL_FEATURES)
+        or set(feature_names) != set(MODEL_FEATURES)
+    ):
+        return None, "model_feature_schema_mismatch"
     frame = pd.DataFrame([{name: feature_row[name] for name in feature_names}])
     prediction = float(artifact["model"].predict(frame)[0])
     if not (-float("inf") < prediction < float("inf")):
