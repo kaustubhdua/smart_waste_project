@@ -45,6 +45,15 @@ def _valid_nonnegative_number(value) -> bool:
     )
 
 
+def _valid_coordinate(value, maximum: float) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and isfinite(value)
+        and -maximum <= value <= maximum
+    )
+
+
 def _validate_matrix(matrix, size: int, label: str) -> None:
     if not isinstance(matrix, list) or len(matrix) != size:
         raise RoutingError(f"Road routing provider returned an invalid {label} matrix")
@@ -99,10 +108,8 @@ async def road_route(coordinates: list[tuple[float, float]]) -> dict:
         or any(
             not isinstance(point, list)
             or len(point) < 2
-            or not _valid_nonnegative_number(abs(point[0]))
-            or not _valid_nonnegative_number(abs(point[1]))
-            or abs(point[0]) > 180
-            or abs(point[1]) > 90
+            or not _valid_coordinate(point[0], 180)
+            or not _valid_coordinate(point[1], 90)
             for point in points
         )
     ):
