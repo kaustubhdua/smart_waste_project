@@ -1,7 +1,8 @@
 # Implementation status and honest limitations
 
 ## Implemented capabilities
-- FastAPI API with shared operator bearer token and individually enrolled device/driver tokens; device and driver tokens are stored as SHA-256 hashes, can be rotated/revoked, and are scoped to a bin or vehicle.
+- FastAPI API with named operator/admin accounts, salted PBKDF2 password hashes, one-time initial-admin bootstrap, eight-hour opaque sessions stored as SHA-256 hashes, account lockout after eight failed attempts, session/account revocation, last-admin protection, and security audit events. Shared API_TOKEN authentication is retained only for non-production compatibility; production operator endpoints require named sessions.
+- Administrator-only user provisioning, account revocation, audit-log access, device credential enrollment/rotation/revocation and driver credential management; operator sessions cannot perform administrator-only credential actions.
 - PostgreSQL/PostGIS Docker Compose environment, SQLAlchemy persistence, Alembic migrations and database readiness check.
 - Bin registry, vehicle registry, telemetry history, collection jobs, service events, route plans and operations summary.
 - Database-enforced one-open-job-per-bin invariant using a partial unique index on unverified collection jobs; the API returns a conflict for competing requests, and the migration refuses to proceed if existing duplicate open jobs need manual resolution.
@@ -20,12 +21,12 @@
 - Pinned dependencies, backend API/optimizer tests, original Python tests, migration checks, browser JavaScript syntax checks, container builds and Compose runtime smoke tests.
 
 ## Still required before production
-- Operator authentication is a shared bearer-token MVP, not multi-user identity, OAuth or granular RBAC. Before exposing the console beyond a trusted deployment boundary, integrate managed identity, per-user roles, rate limiting and an operational secret rotation policy. Production-mode configuration checks do not supply those identity features.
+- Application-level admin/operator identity and session management are implemented, but this is not external SSO/OAuth, MFA, or enterprise identity federation. Add ingress-level distributed rate limiting, MFA/SSO where required, a documented bootstrap-secret rotation procedure, and a formal authorization review before public exposure.
 - Public OSRM is a development dependency with usage limits and no service guarantee; use a contracted or self-hosted routing service for deployment.
 - The model predicts the next observed fill value; it is not a calibrated 6/12-hour forecast. Its current evaluation is based on the repository dataset and does not establish field accuracy. Temperature readings and roughly hourly recent observations are required.
 - Model-assisted demand is disabled by default. Do not enable USE_MODEL_FOR_DISPATCH until model evaluation on representative real sensor data supports the change.
 - No physical sensor has been calibrated or field-tested. Device clock synchronization, sensor mounting, bin geometry and real fill measurement need a pilot.
 - Driver view is online-only, with no offline action queue or embedded turn-by-turn navigation; navigation is handed off to an external map application.
 - Although PostGIS is included in the database image, the current core schema stores latitude/longitude as validated numeric columns rather than using spatial column/index features.
-- Production backups/restore drills, a TLS-terminating reverse proxy/domain, managed secrets, observability/alerting, load tests, accessibility review and a municipal field pilot remain release gates. Compose binds services to loopback; an operator must configure the external TLS proxy and deployment environment.
+- Production backups/restore drills, a TLS-terminating reverse proxy/domain, managed secrets, ingress rate limiting, observability/alerting, load tests, accessibility review and a municipal field pilot remain release gates. Compose binds services to loopback; an operator must configure the external TLS proxy and deployment environment.
 - CI passing proves the checked code and container builds work in the test environment; it does not prove hardware calibration, production load, predictive quality or real-world savings.
