@@ -28,7 +28,7 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 
 | Threat | Impact | Required controls / verification |
 |---|---|---|
-| Bootstrap secret is leaked or initial admin compromised | Attacker may create the first administrator or gain privileged access | Keep API_TOKEN in a secret manager, use one-time bootstrap only, create named users, rotate bootstrap secret, enforce TLS, apply ingress rate limiting and MFA through an identity provider; verify bootstrap cannot be repeated |
+| Bootstrap secret is leaked or initial admin compromised | Attacker may create the first administrator or gain privileged access | Keep API_TOKEN in a secret manager, use one-time bootstrap only, create named users, rotate bootstrap secret, enforce TLS, use the included Nginx per-client login/bootstrap rate limit with a correctly configured trusted-proxy IP chain, add MFA through an identity provider, and verify bootstrap cannot be repeated |
 | Device token theft or replay | False readings or data tampering for a bin | TLS, per-device scope, rotation/revocation, idempotency, anomaly detection, rate limits, clock validation; test revoked and cross-bin credentials |
 | Driver credential misuse | Unauthorized job transitions or operational disruption | Short-lived driver identity, vehicle-scoped authorization, revocation, audit events; test cross-driver and cross-vehicle access |
 | Public API/database exposure | Data theft or service compromise | Private network, TLS ingress, no public DB port, firewall/security groups, secure headers, deployment scan |
@@ -45,7 +45,7 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 
 - [x] Missing, malformed, incorrect, expired, and revoked operator sessions are rejected by automated tests.
 - [x] Admin/operator privilege boundaries, account disablement, one-time bootstrap and last-admin protection are covered by automated tests.
-- [ ] Ingress-level distributed rate limiting, MFA/SSO, and a formal penetration test remain outstanding.
+- [ ] The included Nginx limit is per observed client IP and must be configured with the trusted proxy chain in production; MFA/SSO and a formal penetration test remain outstanding.
 - [ ] Every role is tested against read/write/delete/dispatch/verification/export endpoints.
 - [ ] Device A cannot submit telemetry for Bin B.
 - [ ] Driver A cannot read or transition Driver B's vehicle jobs.
