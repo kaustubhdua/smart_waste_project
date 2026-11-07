@@ -181,7 +181,8 @@ def operator_login(payload: AuthLogin, db: Session = Depends(get_db)):
     if user.locked_until and _utc(user.locked_until) > now:
         verify_password(payload.password, user.password_hash)
         raise HTTPException(status_code=423, detail="Account temporarily locked after repeated failed sign-in attempts")
-    if not user.active or not verify_password(payload.password, user.password_hash):
+    password_valid = verify_password(payload.password, user.password_hash)
+    if not user.active or not password_valid:
         user.failed_login_attempts += 1
         if user.failed_login_attempts >= 8:
             user.locked_until = now + timedelta(minutes=15)
@@ -592,7 +593,7 @@ def list_vehicles(db: Session = Depends(get_db)):
     return [{"id": v.id, "capacity_liters": v.capacity_liters, "active": v.active, "available": v.available, "depot_latitude": v.depot_latitude, "depot_longitude": v.depot_longitude} for v in rows]
 
 @app.post("/api/v1/jobs/{job_id}/assign", dependencies=[Depends(require_operator)])
-def assign_job(job_id: str, payload: JobAssign, db: Session = Depends(get_db)):
+def assign_job(job_id: str, payload: JobAssign, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
     vehicle = db.scalar(select(Vehicle).where(Vehicle.id == payload.vehicle_id).with_for_update())
     if not job:
@@ -611,12 +612,12 @@ def assign_job(job_id: str, payload: JobAssign, db: Session = Depends(get_db)):
     job.status = "assigned"
     job.assigned_vehicle_id = vehicle.id
     vehicle.available = False
-    db.add(ServiceEvent(job_id=job.id, actor=payload.actor, previous_status=previous, new_status="assigned", note="Assigned to vehicle " + vehicle.id))
+    db.add(ServiceEvent(job_id=job.id, actor=principal["username"], previous_status=previous, new_status="assigned", note="Assigned to vehicle " + vehicle.id))
     db.commit()
     return {"id": job.id, "status": job.status, "assigned_vehicle_id": job.assigned_vehicle_id}
 
 @app.post("/api/v1/jobs/{job_id}/transitions", dependencies=[Depends(require_operator)])
-def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get_db)):
+def transition_job(job_id: str, payload: TransitionIn, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
     if not job:
         raise HTTPException(404, "Unknown job")
@@ -638,7 +639,7 @@ def transition_job(job_id: str, payload: TransitionIn, db: Session = Depends(get
     elif payload.status == "approved" and previous in {"assigned", "exception"}:
         job.assigned_vehicle_id = None
         _release_vehicle_if_idle(db, previous_vehicle_id)
-    db.add(ServiceEvent(job_id=job.id, actor=payload.actor, previous_status=previous, new_status=payload.status, note=payload.note))
+    db.add(ServiceEvent(job_id=job.id, actor=principal["username"], previous_status=previous, new_status=payload.status, note=payload.note))
     db.commit()
     return {"id": job.id, "previous_status": previous, "status": job.status}
 
@@ -764,7 +765,7 @@ def driver_transition(job_id: str, payload: DriverTransition, x_driver_id: str |
     return {"id": job.id, "previous_status": previous, "status": job.status}
 
 @app.post("/api/v1/routes/dispatch", dependencies=[Depends(require_operator)])
-async def dispatch_approved_jobs(payload: DispatchRequest, db: Session = Depends(get_db)):
+async def dispatch_approved_jobs(payload: DispatchRequest, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
     """Optimize approved jobs against registered vehicle capacities and atomically assign route stops."""
     jobs = []
     bins = []
@@ -821,7 +822,7 @@ async def dispatch_approved_jobs(payload: DispatchRequest, db: Session = Depends
                 job.status = "assigned"
                 job.assigned_vehicle_id = vehicle.id
                 assigned_job_ids.add(job.id)
-                db.add(ServiceEvent(job_id=job.id, actor="dispatcher", previous_status=previous, new_status="assigned", note=f"Assigned by route plan to vehicle {vehicle.id}"))
+                db.add(ServiceEvent(job_id=job.id, actor=principal["username"], previous_status=previous, new_status="assigned", note=f"Assigned by route plan to vehicle {vehicle.id}"))
                 route_jobs.append({"job_id": job.id, "bin_id": job.bin_id, "sequence": len(route_jobs) + 1, "demand_liters": job.demand_liters})
             route_details.append({**route, "vehicle_id": vehicle.id, "ordered_bin_ids": [bins[i - 1].id for i in route["stop_indices"]], "jobs": route_jobs, "road_distance_meters": geometry["distance_meters"], "road_duration_seconds": geometry["duration_seconds"], "geometry": geometry["geometry"]})
         if assigned_job_ids != {job.id for job in jobs}:
