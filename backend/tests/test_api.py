@@ -563,3 +563,39 @@ def test_forecast_skips_insufficient_history_for_current_feature_schema(monkeypa
     assert response.status_code == 200
     skipped = {item["bin_id"]: item["reason"] for item in response.json()["skipped"]}
     assert skipped["bin-forecast-short"] == "insufficient_history"
+
+
+def test_development_readiness_reports_database_connection():
+    response = client.get("/health/ready")
+    assert response.status_code == 200
+    assert response.json()["schema_revision"] == "development-auto-create"
+
+
+def test_production_readiness_fails_closed_when_alembic_revision_is_missing(monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module.settings, "app_env", "production")
+    response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Database migrations have not been applied"
+
+
+def test_production_readiness_reports_current_schema_and_pending_bootstrap(monkeypatch):
+    from sqlalchemy import text
+    from app.main import settings
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    with SessionLocal() as db:
+        db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
+        db.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0008_operator_identity')"))
+        db.commit()
+    try:
+        response = client.get("/health/ready")
+        assert response.status_code == 200, response.text
+        assert response.json()["schema_revision"] == "0008_operator_identity"
+        assert response.json()["operator_auth"] == "named_sessions"
+        assert response.json()["bootstrap_status"] == "pending"
+    finally:
+        with SessionLocal() as db:
+            db.execute(text("DROP TABLE IF EXISTS alembic_version"))
+            db.commit()
