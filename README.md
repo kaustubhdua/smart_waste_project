@@ -17,7 +17,7 @@ A full-stack waste-operations engineering prototype combining IoT telemetry, col
 
 </div>
 
-> **Honest status:** This is a portfolio/engineering prototype, not a proven municipal deployment. Demo records are synthetic, and no physical sensor calibration, production restore drill, live field pilot, or operational-savings claim has been validated. Review the [release checklist](docs/RELEASE_CHECKLIST.md) before treating it as production software.
+> **Honest status:** This is a portfolio/engineering prototype, not a proven municipal deployment. Demo records are synthetic and can only be seeded by explicitly setting `SEED_DEMO_DATA=true` outside production. No physical sensor calibration, production restore drill, live field pilot, or operational-savings claim has been validated. Review the [release checklist](docs/RELEASE_CHECKLIST.md) before treating it as production software.
 
 ## Contents
 
