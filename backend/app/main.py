@@ -798,6 +798,9 @@ def driver_transition(
     key = idempotency_key or str(uuid4())
     if len(key) < 16 or len(key) > 128 or any(character.isspace() for character in key):
         raise HTTPException(422, "Idempotency-Key must be 16–128 non-whitespace characters")
+    request_hash = sha256(
+        json.dumps({"status": payload.status, "note": payload.note}, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id).with_for_update())
     if not job:
