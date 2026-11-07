@@ -12,7 +12,7 @@ from secrets import token_urlsafe
 from uuid import uuid4
 from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .auth import hash_password, verify_password, hash_session_token
@@ -24,7 +24,9 @@ from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 from .priority import calculate_priority
 
-app = FastAPI(title="Smart Waste Operations API", version="1.2.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
+EXPECTED_SCHEMA_REVISION = "0008_operator_identity"
+
+app = FastAPI(title="Smart Waste Operations API", version="1.3.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
 if settings.auto_create_schema:
     Base.metadata.create_all(bind=engine)
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'DELETE', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'X-Bootstrap-Token', 'X-Device-Token', 'X-Driver-Id', 'X-Driver-Token'])
@@ -306,7 +308,28 @@ def readiness(db: Session = Depends(get_db)):
         db.execute(select(1))
     except Exception as exc:
         raise HTTPException(503, "Database is not ready") from exc
-    return {"status": "ready", "database": "connected"}
+
+    if settings.app_env.strip().lower() == "production":
+        try:
+            revision = db.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+        except Exception as exc:
+            raise HTTPException(503, "Database migrations have not been applied") from exc
+        if revision != EXPECTED_SCHEMA_REVISION:
+            raise HTTPException(503, "Database schema is not at the expected migration revision")
+        bootstrap_complete = db.get(OperatorBootstrap, "initial_admin") is not None
+        return {
+            "status": "ready",
+            "database": "connected",
+            "schema_revision": revision,
+            "operator_auth": "named_sessions",
+            "bootstrap_status": "complete" if bootstrap_complete else "pending",
+        }
+
+    return {
+        "status": "ready",
+        "database": "connected",
+        "schema_revision": "development-auto-create" if settings.auto_create_schema else "external-migrations",
+    }
 
 @app.post("/api/v1/bins", response_model=BinOut, dependencies=[Depends(require_operator)], status_code=201)
 def create_bin(payload: BinCreate, db: Session = Depends(get_db)):
