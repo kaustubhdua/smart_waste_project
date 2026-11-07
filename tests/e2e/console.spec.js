@@ -323,7 +323,7 @@ test("operator can sign in with a named account, use an expiring session and sig
 
   await page.goto("/");
   await page.getByLabel("Operator username").fill("ops.dispatch");
-  await page.getByLabel("Password").fill("a-long-test-password");
+  await page.getByLabel("Password", { exact: true }).fill("a-long-test-password");
   await page.getByRole("button", { name: "Connect & load bins" }).click();
   await expect(page.getByRole("status")).toContainText(/Loaded 0 bins from API/i);
   expect(observed.length).toBeGreaterThan(0);
@@ -378,7 +378,7 @@ test("administrator can provision and revoke operator accounts from the console"
 
   await page.goto("/");
   await page.getByLabel("Operator username").fill("rootadmin");
-  await page.getByLabel("Password").fill("admin-password-123");
+  await page.getByLabel("Password", { exact: true }).fill("admin-password-123");
   await page.getByRole("button", { name: "Connect & load bins" }).click();
   await expect(page.locator("#operatorUsersPanel")).toBeVisible();
   await expect(page.locator("#operatorUsers")).toContainText("rootadmin");
