@@ -77,3 +77,14 @@ Start with a supervised pilot and retain a manual collection fallback. Do not in
 ## 8. Rollback and post-release review
 
 Document the last known-good image, compatible database schema, rollback owner and communication path before deployment. Prefer forward fixes for irreversible schema changes; database rollback must not be assumed safe. After release, review alerts, errors, dispatch outcomes and operator feedback, and update the release record.
+
+
+## Database backup and restore
+
+The repository includes guarded custom-format PostgreSQL scripts:
+
+- Create a local backup: `bash scripts/backup-postgres.sh` (or pass an explicit destination path). Files are created with restrictive permissions and existing destination files are never overwritten.
+- Verify and restore a backup: `CONFIRM_RESTORE=YES bash scripts/restore-postgres.sh /absolute/path/to/backup.dump`. Restore refuses to run without the explicit confirmation variable, validates the archive first, stops the API and web services, and runs pg_restore in a single transaction before restarting the services.
+- Keep backups encrypted at rest and off-host, apply retention, and regularly perform restore drills in an isolated environment. The scripts do not provide encryption, off-site storage, scheduling, or a retention policy.
+- Before restoring production, verify the target environment, backup timestamp, database identity and incident approval. A restore replaces the target database state; do not point it at an unrelated environment.
+- CI exercises a backup, writes a marker record, restores the snapshot, and verifies that the post-snapshot record is absent.
