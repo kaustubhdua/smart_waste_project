@@ -46,7 +46,9 @@ def _priority_score(fill_percent: float, bin_row: Bin) -> float:
         )
     return calculate_priority(fill_percent, hours_elapsed, bin_row.criticality)
 
+MODEL_FEATURE_SCHEMA_VERSION = 2
 MODEL_FEATURES = ["capacity_liters", "temperature_c", "hour", "day_of_week", "is_weekend", "fill_lag_1h", "fill_lag_3h", "rolling_mean_6h"]
+
 
 def _load_forecast_artifact():
     path = Path(settings.model_path)
@@ -55,20 +57,33 @@ def _load_forecast_artifact():
     artifact = joblib.load(path)
     if isinstance(artifact, dict) and "model" in artifact:
         return artifact
-    return {"model": artifact, "features": MODEL_FEATURES, "metrics": {"evaluation_note": "Legacy artifact; validation metadata unavailable."}}
+    return {"model": artifact, "features": MODEL_FEATURES, "feature_schema_version": 1, "metrics": {"evaluation_note": "Legacy artifact; feature semantics are not compatible with schema version 2."}}
+
 
 def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
     artifact = artifact if artifact is not None else _load_forecast_artifact()
     if artifact is None:
         return None, "model_artifact_missing"
+    if artifact.get("feature_schema_version") != MODEL_FEATURE_SCHEMA_VERSION:
+        return None, "model_feature_schema_mismatch"
     rows = list(db.scalars(select(Telemetry).where(Telemetry.bin_id == bin_row.id).order_by(Telemetry.measured_at.desc()).limit(6)))
     rows.reverse()
-    if len(rows) < 3:
+    if not rows:
         return None, "insufficient_history"
-    intervals_minutes = [(_utc(rows[i].measured_at) - _utc(rows[i - 1].measured_at)).total_seconds() / 60 for i in range(1, len(rows))]
-    if any(interval < 30 or interval > 90 for interval in intervals_minutes[-2:]):
-        return None, "history_cadence_mismatch"
     latest = rows[-1]
+    recent_cutoff = _utc(latest.measured_at) - timedelta(hours=6)
+    recent_rows = [row for row in rows if _utc(row.measured_at) >= recent_cutoff]
+    if len(recent_rows) < 4:
+        return None, "insufficient_history"
+    intervals_minutes = [
+        (_utc(recent_rows[i].measured_at) - _utc(recent_rows[i - 1].measured_at)).total_seconds() / 60
+        for i in range(1, len(recent_rows))
+    ]
+    if len(intervals_minutes) < 3 or any(interval < 30 or interval > 90 for interval in intervals_minutes[-3:]):
+        return None, "history_cadence_mismatch"
+    three_hour_span = (_utc(latest.measured_at) - _utc(recent_rows[-4].measured_at)).total_seconds() / 60
+    if not 150 <= three_hour_span <= 210:
+        return None, "history_cadence_mismatch"
     if _is_stale(latest.measured_at):
         return None, "stale_telemetry"
     if latest.temperature_c is None:
@@ -81,18 +96,22 @@ def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
         "day_of_week": timestamp.weekday(),
         "is_weekend": int(timestamp.weekday() >= 5),
         "fill_lag_1h": latest.fill_percent,
-        "fill_lag_3h": rows[-3].fill_percent,
-        "rolling_mean_6h": mean(row.fill_percent for row in rows[-6:]),
+        "fill_lag_3h": recent_rows[-4].fill_percent,
+        "rolling_mean_6h": mean(row.fill_percent for row in recent_rows),
     }
     feature_names = artifact.get("features", MODEL_FEATURES)
-    missing = set(feature_names).difference(feature_row)
-    if missing:
-        raise ValueError(f"Model expects unsupported features: {sorted(missing)}")
+    if (
+        not isinstance(feature_names, list)
+        or len(feature_names) != len(MODEL_FEATURES)
+        or set(feature_names) != set(MODEL_FEATURES)
+    ):
+        return None, "model_feature_schema_mismatch"
     frame = pd.DataFrame([{name: feature_row[name] for name in feature_names}])
     prediction = float(artifact["model"].predict(frame)[0])
     if not (-float("inf") < prediction < float("inf")):
         raise ValueError("Model returned a non-finite prediction")
     return min(100.0, max(0.0, prediction)), None
+
 
 def _release_vehicle_if_idle(db: Session, vehicle_id: str | None):
     if not vehicle_id:
