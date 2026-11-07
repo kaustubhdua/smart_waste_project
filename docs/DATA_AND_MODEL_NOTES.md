@@ -15,7 +15,13 @@ The priority engine uses trapezoidal membership functions for low/medium/high fi
 
 The consequent anchors and input membership breakpoints are documented in `backend/app/priority.py`. They are engineering defaults for the demonstration, not universal municipal thresholds. Calibrate them with operators and field outcomes before using the score for real dispatch decisions. A missing verified-emptying timestamp is represented as zero elapsed hours rather than inventing service history.
 
-## Forecast feature contract (schema version 2)\n\nThe one-step model is trained only on next-observation intervals of 30–90 minutes. The 1-hour lag is populated only when the previous observation is 30–90 minutes old. The 3-hour lag requires three consecutive 30–90 minute intervals and a total span of 150–210 minutes. The rolling mean uses a time-based six-hour window, excludes the current observation, and requires at least three prior readings. Training rows with incomplete or cadence-mismatched features are excluded rather than backfilled.\n\nAt inference, the API requires at least four readings in the most recent six hours, validates the last three intervals and the three-hour span, and uses the same feature definitions. Model artifacts carry a feature-schema version; legacy artifacts with the old observation-count semantics are skipped with `model_feature_schema_mismatch` and must be retrained. Predictions remain estimates of the next observation, not fixed-horizon forecasts.\n\n## Interpretation
+## Forecast feature contract (schema version 2)
+
+The one-step model is trained only on next-observation intervals of 30–90 minutes. The 1-hour lag is populated only when the previous observation is 30–90 minutes old. The 3-hour lag requires three consecutive 30–90 minute intervals and a total span of 150–210 minutes. The rolling mean uses a time-based six-hour window, excludes the current observation, and requires at least three prior readings. Training rows with incomplete or cadence-mismatched features are excluded rather than backfilled.
+
+At inference, the API requires at least four readings in the most recent six hours, validates the last three intervals and the three-hour span, and uses the same feature definitions. Model artifacts carry a feature-schema version; legacy artifacts with the old observation-count semantics are skipped with `model_feature_schema_mismatch` and must be retrained. Predictions remain estimates of the next observation, not fixed-horizon forecasts.
+
+## Interpretation
 - A prediction is an estimate, not a sensor reading.
 - A fuzzy priority score is a decision-support model encoded as fuzzy membership and rule inference; it is not a universal urgency label.
 - A route is only as reliable as its coordinates, distance assumptions, vehicle capacities, and input validation.
