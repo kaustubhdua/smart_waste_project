@@ -39,7 +39,7 @@ The old shared `API_TOKEN` is accepted as an operator credential only when `APP_
 
 ## Driver workflow and offline recovery
 
-The driver page lists jobs assigned to the authenticated driver's vehicle and supports start, completion and exception transitions. The app shell and last-synced jobs are cached locally; offline actions are queued in IndexedDB and replayed with stable idempotency keys after reconnect. The queue stores action metadata, not the driver token. The driver token remains in tab-scoped session storage. Navigation is handed off to an external map application.
+The driver page lists jobs assigned to the authenticated driver's vehicle and supports start, completion and exception transitions. The app shell and last-synced jobs are cached locally; offline actions are queued in IndexedDB and replayed with stable idempotency keys when the driver page is open/reopened online; OS-level Background Sync is not implemented. The queue stores action metadata, not the driver token. The driver token remains in tab-scoped session storage. Navigation is handed off to an external map application.
 
 Driver transition requests accept an `Idempotency-Key` header. The database stores the key, driver/job/action identity, request fingerprint and original response. Replaying the exact request returns the original response without creating another service event; reusing a key with a changed payload or another job returns HTTP 409. A queued action that conflicts with the server's current job state remains blocked for driver/operator review rather than being silently discarded.
 
