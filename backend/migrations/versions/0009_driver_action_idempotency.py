@@ -15,6 +15,7 @@ def upgrade():
         sa.Column('driver_id', sa.String(length=100), sa.ForeignKey('drivers.id'), nullable=False),
         sa.Column('job_id', sa.String(length=80), sa.ForeignKey('collection_jobs.id'), nullable=False),
         sa.Column('action', sa.String(length=30), nullable=False),
+        sa.Column('request_hash', sa.String(length=64), nullable=False),
         sa.Column('response_json', sa.Text(), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     )
