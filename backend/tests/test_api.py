@@ -592,3 +592,68 @@ def test_nearby_bins_returns_distance_order_and_enforces_radius():
         assert client.post("/api/v1/bins", json=payload, headers=OP).status_code == 201
 
 
+def test_alembic_history_has_a_single_head_matching_expected_revision():
+    from pathlib import Path
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from app.main import EXPECTED_SCHEMA_REVISION
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    assert ScriptDirectory.from_config(config).get_heads() == [EXPECTED_SCHEMA_REVISION]
+
+
+def test_development_readiness_reports_database_connection():
+    response = client.get("/health/ready")
+    assert response.status_code == 200
+    assert response.json()["schema_revision"] == "development-auto-create"
+
+
+def test_production_readiness_fails_closed_when_alembic_revision_is_missing(monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module.settings, "app_env", "production")
+    response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Database migrations have not been applied"
+
+
+def test_production_readiness_reports_current_schema_and_pending_bootstrap(monkeypatch):
+    from sqlalchemy import text
+    from app.main import EXPECTED_SCHEMA_REVISION, settings
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    with SessionLocal() as db:
+        db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL PRIMARY KEY)"))
+        db.execute(text("INSERT INTO alembic_version (version_num) VALUES (:rev)"), {"rev": EXPECTED_SCHEMA_REVISION})
+        db.commit()
+    try:
+        response = client.get("/health/ready")
+        assert response.status_code == 200, response.text
+        assert response.json()["schema_revision"] == EXPECTED_SCHEMA_REVISION
+        assert response.json()["operator_auth"] == "named_sessions"
+        assert response.json()["bootstrap_status"] == "pending"
+    finally:
+        with SessionLocal() as db:
+            db.execute(text("DROP TABLE IF EXISTS alembic_version"))
+            db.commit()
+
+
+def test_production_readiness_rejects_a_stale_schema_revision(monkeypatch):
+    from sqlalchemy import text
+    from app.main import settings
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    with SessionLocal() as db:
+        db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL PRIMARY KEY)"))
+        db.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0008_operator_identity')"))
+        db.commit()
+    try:
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Database schema is not at the expected migration revision"
+    finally:
+        with SessionLocal() as db:
+            db.execute(text("DROP TABLE IF EXISTS alembic_version"))
+            db.commit()

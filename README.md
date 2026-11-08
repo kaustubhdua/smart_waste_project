@@ -196,7 +196,7 @@ The web container reverse-proxies `/api/*` and health/API documentation routes t
 | Path | What lives here |
 |---|---|
 | `backend/app/` | FastAPI routes, data models, configuration, routing and optimization |
-| `backend/alembic/` | Database schema migrations |
+| `backend/migrations/` | Alembic database schema migrations |
 | `web/` | Operator console, driver view and Nginx configuration |
 | `tests/` | Core tests and Playwright browser E2E tests |
 | `.github/workflows/` | CI, CodeQL and browser test workflows |
