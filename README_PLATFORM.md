@@ -37,10 +37,16 @@ From the repository root, install `requirements.txt` and run `python person2_ml_
 
 The old shared `API_TOKEN` is accepted as an operator credential only when `APP_ENV` is not `production`, to keep local development and existing test workflows simple. In production it is a one-time bootstrap secret only; it is not accepted on normal operator endpoints.
 
+## Driver workflow and offline recovery
+
+The driver page lists jobs assigned to the authenticated driver's vehicle and supports start, completion and exception transitions. The app shell and last-synced jobs are cached locally; offline actions are queued in IndexedDB and replayed with stable idempotency keys when the driver page is open/reopened online; OS-level Background Sync is not implemented. The queue stores action metadata, not the driver token. The driver token remains in tab-scoped session storage. Navigation is handed off to an external map application.
+
+Driver transition requests accept an `Idempotency-Key` header. The database stores the key, driver/job/action identity, request fingerprint and original response. Replaying the exact request returns the original response without creating another service event; reusing a key with a changed payload or another job returns HTTP 409. A queued action that conflicts with the server's current job state remains blocked for driver/operator review rather than being silently discarded.
+
 ## Data truthfulness
 
 Every bin has a `source` of `live`, `imported`, or `demo`. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. Routing uses real road-network distance/time data; if the provider fails, the API returns an error rather than fabricating distances. The API serves next-observation forecasts when a trained artifact and suitable telemetry are available; no field-performance claims are made. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.
 
 ## Production configuration guardrails
 
-Set `APP_ENV=production` to make the API refuse unsafe startup configuration. Production requires a non-SQLite durable database, a unique `API_TOKEN` of at least 32 characters for one-time initial-admin bootstrap, `AUTO_CREATE_SCHEMA=false`, `SEED_DEMO_DATA=false`, a trusted HTTPS routing provider, and explicit trusted HTTPS origins in `CORS_ORIGINS`. Apply schema changes through Alembic migrations. Compose publishes database, API, and web ports on loopback by default and includes readiness/health checks; keep these binds local and terminate TLS at a properly configured reverse proxy. The guard prevents common misconfiguration; it is not a substitute for identity-based RBAC, managed secrets, backups, monitoring, and a security review.
+Set `APP_ENV=production` to make the API refuse unsafe startup configuration. Production requires a non-SQLite durable database, a unique `API_TOKEN` of at least 32 characters for one-time initial-admin bootstrap, `AUTO_CREATE_SCHEMA=false`, `SEED_DEMO_DATA=false`, a trusted HTTPS routing provider, and explicit trusted HTTPS origins in `CORS_ORIGINS`. Apply schema changes through Alembic migrations. Compose publishes database, API, and web ports on loopback by default and includes readiness/health checks; keep these binds local and terminate TLS at a properly configured reverse proxy. The guard prevents common misconfiguration; it is not a substitute for MFA/SSO decisions, trusted-proxy rate-limit configuration, managed secrets, backups, monitoring, and a security review.

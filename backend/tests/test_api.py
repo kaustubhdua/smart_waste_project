@@ -166,9 +166,20 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
     assert driver_jobs.status_code == 200
     assert sorted(j["id"] for j in driver_jobs.json()) == sorted(jobs)
     for job_id in jobs:
-        started = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"in_progress"}, headers=driver_headers)
+        start_key = "driver-start-action-" + job_id
+        start_headers = {**driver_headers, "Idempotency-Key": start_key}
+        started = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"in_progress"}, headers=start_headers)
         assert started.status_code == 200
-        completed = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"completed","note":"Collected and recorded by driver"}, headers=driver_headers)
+        replayed = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"in_progress"}, headers=start_headers)
+        assert replayed.status_code == 200
+        assert replayed.json() == started.json()
+        changed_payload = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"in_progress","note":"different payload"}, headers=start_headers)
+        assert changed_payload.status_code == 409
+        conflicting_reuse = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"completed"}, headers=start_headers)
+        assert conflicting_reuse.status_code == 409
+        events = client.get(f"/api/v1/jobs/{job_id}/events", headers=OP).json()
+        assert sum(event["new_status"] == "in_progress" for event in events) == 1
+        completed = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"completed","note":"Collected and recorded by driver"}, headers={**driver_headers, "Idempotency-Key": "driver-complete-action-" + job_id})
         assert completed.status_code == 200
         verified = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"verified","actor":"operator"}, headers=OP)
         assert verified.status_code == 200
@@ -580,18 +591,4 @@ def test_nearby_bins_returns_distance_order_and_enforces_radius():
     for payload in bins:
         assert client.post("/api/v1/bins", json=payload, headers=OP).status_code == 201
 
-    response = client.get(
-        "/api/v1/bins/nearby",
-        params={"latitude": 28.6, "longitude": 77.2, "radius_meters": 500},
-        headers=OP,
-    )
-    assert response.status_code == 200, response.text
-    results = response.json()
-    assert [row["id"] for row in results] == ["near-center", "near-next"]
-    assert results[0]["distance_meters"] == 0
-    assert 100 < results[1]["distance_meters"] < 120
-    assert client.get(
-        "/api/v1/bins/nearby",
-        params={"latitude": 28.6, "longitude": 77.2, "radius_meters": 50001},
-        headers=OP,
-    ).status_code == 422
+

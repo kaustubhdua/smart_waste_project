@@ -24,7 +24,7 @@ test("operator console rejects insecure remote API hosts before sending credenti
   await page.getByLabel("API base URL").fill("http://api.test");
   await page.getByLabel("Operator bearer token").fill("must-not-leave-browser");
   await page.getByRole("button", { name: "Connect & load bins" }).click();
-  await expect(page.getByRole("status")).toContainText(/remote API hosts must use HTTPS/i);
+  await expect(page.locator("#status")).toContainText(/remote API hosts must use HTTPS/i);
   expect(requestSent).toBe(false);
 });
 
@@ -36,7 +36,7 @@ test("driver view rejects insecure remote API hosts before sending credentials",
   await page.getByLabel("Driver ID").fill("DRIVER-E2E");
   await page.getByLabel("Driver token").fill("must-not-leave-browser");
   await page.getByRole("button", { name: "Load assigned stops" }).click();
-  await expect(page.getByRole("status")).toContainText(/remote API hosts must use HTTPS/i);
+  await expect(page.locator("#status")).toContainText(/remote API hosts must use HTTPS/i);
   expect(requestSent).toBe(false);
 });
 
@@ -52,7 +52,7 @@ test("driver view reports authentication failure and does not invent jobs", asyn
   await page.getByLabel("Driver ID").fill("DRIVER-E2E");
   await page.getByLabel("Driver token").fill("invalid-token");
   await page.getByRole("button", { name: "Load assigned stops" }).click();
-  await expect(page.getByRole("status")).toContainText(/invalid driver credentials/i);
+  await expect(page.locator("#status")).toContainText(/invalid driver credentials/i);
   await expect(page.locator("#jobs")).toContainText("No jobs loaded.");
 });
 
@@ -86,7 +86,7 @@ test("driver can start and complete an assigned stop", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Mark collected" })).toBeVisible();
   await page.getByRole("button", { name: "Mark collected" }).click();
   await expect(page.getByText(/No assigned or in-progress jobs/)).toBeVisible();
-  await expect(page.getByRole("status")).toContainText(/loaded 0 assigned stops/i);
+  await expect(page.locator("#status")).toContainText(/loaded 0 assigned stops/i);
 });
 
 

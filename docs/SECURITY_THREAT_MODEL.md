@@ -9,6 +9,7 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 - Operator credential and database credentials
 - Device and driver credentials
 - Bin locations, telemetry, collection schedules, routes, and service history
+- Locally cached driver stop details and queued offline collection actions
 - Vehicle capacity/availability and dispatch decisions
 - Model artifacts and any imported datasets
 - Database backups, logs, and deployment configuration
@@ -30,7 +31,8 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 |---|---|---|
 | Bootstrap secret is leaked or initial admin compromised | Attacker may create the first administrator or gain privileged access | Keep API_TOKEN in a secret manager, use one-time bootstrap only, create named users, rotate bootstrap secret, enforce TLS, use the included Nginx per-client login/bootstrap rate limit with a correctly configured trusted-proxy IP chain, add MFA through an identity provider, and verify bootstrap cannot be repeated |
 | Device token theft or replay | False readings or data tampering for a bin | TLS, per-device scope, rotation/revocation, idempotency, anomaly detection, rate limits, clock validation; test revoked and cross-bin credentials |
-| Driver credential misuse | Unauthorized job transitions or operational disruption | Short-lived driver identity, vehicle-scoped authorization, revocation, audit events; test cross-driver and cross-vehicle access |
+| Driver credential misuse | Unauthorized job transitions or operational disruption | Vehicle-scoped authorization, credential revocation, audit events, request-bound idempotency keys; test cross-driver, cross-vehicle and replay behavior |
+| Shared or lost driver device | Cached stop/location data or queued actions may be exposed to another device user | Device lock, per-driver sessionStorage credentials, no driver token in IndexedDB, clear cached stops on sign-out, restrict browser-profile access and define device wipe/retention procedures |
 | Public API/database exposure | Data theft or service compromise | Private network, TLS ingress, no public DB port, firewall/security groups, secure headers, deployment scan |
 | Secret leakage in Git/logs/browser | Account compromise | Secret manager, scanning, log redaction, HttpOnly cookie sessions, no token in JavaScript storage or login JSON, rotate exposed credentials and inspect history |
 | Cross-site request forgery against browser session | Unauthorized state changes | SameSite=Strict HttpOnly cookie, strict Origin allowlist on cookie-authenticated mutations, credentialed CORS only for exact trusted origins, same-origin deployment; test malicious and allowed Origin values |
@@ -50,8 +52,7 @@ This document identifies security boundaries for the Smart Waste Collection Plat
 - [ ] Every role is tested against read/write/delete/dispatch/verification/export endpoints.
 - [ ] Device A cannot submit telemetry for Bin B.
 - [ ] Driver A cannot read or transition Driver B's vehicle jobs.
-- [x] Cookie-authenticated state changes reject untrusted/missing Origin values; the trusted local origin and malicious-origin rejection are covered by automated tests.
-- [ ] Production CORS origins and the reverse-proxy host/origin configuration are reviewed during deployment.
+
 - [ ] Oversized CSV, malformed values, timestamp skew, duplicate IDs, and invalid transitions fail safely.
 - [ ] Parallel dispatch attempts cannot assign a job or vehicle inconsistently.
 - [ ] Secrets are absent from browser bundles, logs, screenshots, workflow output, and tracked configuration.
