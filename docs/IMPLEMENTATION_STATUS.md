@@ -1,11 +1,13 @@
 # Implementation status and honest limitations
 
 ## Implemented capabilities
-- FastAPI API with named operator/admin accounts, salted PBKDF2 password hashes, one-time initial-admin bootstrap, eight-hour opaque sessions stored as SHA-256 hashes, account lockout after eight failed attempts, session/account revocation, last-admin protection, and security audit events. Shared API_TOKEN authentication is retained only for non-production compatibility; production operator endpoints require named sessions.
+- FastAPI API with named operator/admin accounts, salted PBKDF2 password hashes, one-time initial-admin bootstrap, eight-hour HttpOnly/SameSite=Strict browser cookies (Secure in production), with opaque session tokens stored only as SHA-256 hashes server-side and Origin validation on cookie-authenticated mutations, account lockout after eight failed attempts, session/account revocation, serialized last-admin protection, password-change session rotation, and security audit events. Shared API_TOKEN authentication is retained only for non-production compatibility; production operator endpoints require named sessions.
 - Administrator-only user provisioning, account revocation, audit-log access, device credential enrollment/rotation/revocation and driver credential management; operator sessions cannot perform administrator-only credential actions.
-- PostgreSQL/PostGIS Docker Compose environment, SQLAlchemy persistence, Alembic migrations and database readiness check.
+- PostgreSQL/PostGIS Docker Compose environment, SQLAlchemy persistence, Alembic migrations and database readiness check; a functional geography GiST index powers the authenticated nearby-bin radius endpoint, with a Haversine fallback for SQLite tests.
+- Guarded custom-format PostgreSQL backup and transactional restore scripts, with a CI restore drill that proves post-snapshot writes are removed by restore.
 - Bin registry, vehicle registry, telemetry history, collection jobs, service events, route plans and operations summary.
 - Database-enforced one-open-job-per-bin invariant using a partial unique index on unverified collection jobs; the API returns a conflict for competing requests, and the migration refuses to proceed if existing duplicate open jobs need manual resolution.
+- Nearby-bin search validates geographic coordinates and radius bounds, returns distance-ordered active bins, uses indexed PostGIS geography on PostgreSQL, and is exercised by both SQLite unit tests and a real PostGIS Compose smoke test.
 - Live telemetry ingestion with timezone validation, future-clock-skew rejection, configurable freshness checks, idempotent message handling and bin-scoped device authorization.
 - Historical telemetry CSV import with required-column validation, upload and row limits, deduplication, batch commit and explicit imported source labels.
 - Versioned model artifact loading and next-observation inference with timestamp-aware one-hour/three-hour lags, a true six-hour rolling window, a 30–90 minute target cadence, four recent readings, and legacy feature-schema rejection. Predictions are skipped when history does not satisfy the feature contract.
@@ -21,7 +23,7 @@
 - Pinned dependencies, backend API/optimizer tests, original Python tests, migration checks, browser JavaScript syntax checks, container builds and Compose runtime smoke tests.
 
 ## Still required before production
-- Application-level admin/operator identity and session management are implemented, but this is not external SSO/OAuth, MFA, or enterprise identity federation. Add ingress-level distributed rate limiting, MFA/SSO where required, a documented bootstrap-secret rotation procedure, and a formal authorization review before public exposure.
+- Application-level admin/operator identity and session management are implemented, but this is not external SSO/OAuth, MFA, or enterprise identity federation. Add ingress-level distributed rate limiting beyond the included Nginx per-IP login/bootstrap limit, MFA/SSO where required, a documented bootstrap-secret rotation procedure, and a formal authorization review before public exposure.
 - Public OSRM is a development dependency with usage limits and no service guarantee; use a contracted or self-hosted routing service for deployment.
 - The model predicts the next observed fill value; it is not a calibrated 6/12-hour forecast. Its current evaluation is based on the repository dataset and does not establish field accuracy. Inference requires four recent readings with approximately hourly cadence and temperature values; the feature contract does not prove real-world predictive accuracy.
 - Model-assisted demand is disabled by default. Do not enable USE_MODEL_FOR_DISPATCH until model evaluation on representative real sensor data supports the change.

@@ -3,6 +3,7 @@ import csv
 import json
 import io
 from pathlib import Path
+from math import asin, cos, radians, sin, sqrt
 from statistics import mean
 import joblib
 import pandas as pd
@@ -10,7 +11,7 @@ from hmac import compare_digest
 from hashlib import sha256
 from secrets import token_urlsafe
 from uuid import uuid4
-from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, Header, Cookie, HTTPException, UploadFile, File, Response, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func, text
 from sqlalchemy.exc import IntegrityError
@@ -24,12 +25,7 @@ from .routing import road_route, road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 from .priority import calculate_priority
 
-EXPECTED_SCHEMA_REVISION = "0009_driver_action_idempotency"
 
-app = FastAPI(title="Smart Waste Operations API", version="1.4.0", description="Persistent bin telemetry, collection jobs and road-network routing.")
-if settings.auto_create_schema:
-    Base.metadata.create_all(bind=engine)
-app.add_middleware(CORSMiddleware, allow_origins=[origin.strip() for origin in settings.cors_origins.split(',') if origin.strip()], allow_credentials=False, allow_methods=['GET', 'POST', 'DELETE', 'OPTIONS'], allow_headers=['Authorization', 'Content-Type', 'Idempotency-Key', 'X-Bootstrap-Token', 'X-Device-Token', 'X-Driver-Id', 'X-Driver-Token'])
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
@@ -51,6 +47,7 @@ def _priority_score(fill_percent: float, bin_row: Bin) -> float:
 MODEL_FEATURE_SCHEMA_VERSION = 2
 MODEL_FEATURES = ["capacity_liters", "temperature_c", "hour", "day_of_week", "is_weekend", "fill_lag_1h", "fill_lag_3h", "rolling_mean_6h"]
 
+
 def _load_forecast_artifact():
     path = Path(settings.model_path)
     if not path.is_file():
@@ -60,19 +57,25 @@ def _load_forecast_artifact():
         return artifact
     return {"model": artifact, "features": MODEL_FEATURES, "feature_schema_version": 1, "metrics": {"evaluation_note": "Legacy artifact; feature semantics are not compatible with schema version 2."}}
 
+
 def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
     artifact = artifact if artifact is not None else _load_forecast_artifact()
     if artifact is None:
         return None, "model_artifact_missing"
     if artifact.get("feature_schema_version") != MODEL_FEATURE_SCHEMA_VERSION:
         return None, "model_feature_schema_mismatch"
-    rows = list(db.scalars(select(Telemetry).where(Telemetry.bin_id == bin_row.id).order_by(Telemetry.measured_at.desc()).limit(6)))
+    # Six hours at the supported 30-minute minimum cadence can contain
+    # thirteen readings. Fetch enough history to construct the same true
+    # time-based window used during training.
+    rows = list(db.scalars(select(Telemetry).where(Telemetry.bin_id == bin_row.id).order_by(Telemetry.measured_at.desc()).limit(1000)))
     rows.reverse()
     if not rows:
         return None, "insufficient_history"
     latest = rows[-1]
     recent_cutoff = _utc(latest.measured_at) - timedelta(hours=6)
     recent_rows = [row for row in rows if _utc(row.measured_at) >= recent_cutoff]
+    if len(recent_rows) >= 1000:
+        return None, "history_density_too_high"
     if len(recent_rows) < 4:
         return None, "insufficient_history"
     intervals_minutes = [
@@ -95,9 +98,10 @@ def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
         "hour": timestamp.hour,
         "day_of_week": timestamp.weekday(),
         "is_weekend": int(timestamp.weekday() >= 5),
-        "fill_lag_1h": latest.fill_percent,
+        "fill_lag_1h": recent_rows[-2].fill_percent,
         "fill_lag_3h": recent_rows[-4].fill_percent,
-        "rolling_mean_6h": mean(row.fill_percent for row in recent_rows),
+        # Training excludes the current observation from this six-hour window.
+        "rolling_mean_6h": mean(row.fill_percent for row in recent_rows[:-1]),
     }
     feature_names = artifact.get("features", MODEL_FEATURES)
     if (
@@ -111,6 +115,7 @@ def _predict_next_fill_for_bin(db: Session, bin_row: Bin, artifact=None):
     if not (-float("inf") < prediction < float("inf")):
         raise ValueError("Model returned a non-finite prediction")
     return min(100.0, max(0.0, prediction)), None
+
 
 def _release_vehicle_if_idle(db: Session, vehicle_id: str | None):
     if not vehicle_id:
@@ -132,12 +137,27 @@ def _audit(db: Session, actor_user_id: str | None, action: str, subject: str = "
     db.add(OperatorAuditEvent(actor_user_id=actor_user_id, action=action, subject=subject[:128]))
 
 
-def get_current_operator(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Operator sign-in required")
-    raw_token = authorization[7:].strip()
+def get_current_operator(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    wasteops_session: str | None = Cookie(default=None),
+    db: Session = Depends(get_db),
+):
+    raw_token = (
+        authorization[7:].strip()
+        if authorization and authorization.startswith("Bearer ")
+        else (wasteops_session or "")
+    )
     if not raw_token:
         raise HTTPException(status_code=401, detail="Operator sign-in required")
+    uses_cookie_session = bool(wasteops_session) and not (
+        authorization and authorization.startswith("Bearer ")
+    )
+    if uses_cookie_session and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        origin = request.headers.get("origin")
+        allowed_origins = {value.strip() for value in settings.cors_origins.split(",") if value.strip()}
+        if not origin or origin not in allowed_origins:
+            raise HTTPException(status_code=403, detail="Cross-origin browser mutation rejected")
     configured = settings.api_token
     placeholder = configured.strip() != configured or not configured.strip() or any(character.isspace() for character in configured) or configured.lower().startswith(("change-me", "replace-with"))
     # Shared bootstrap token remains available only for local development and tests.
@@ -190,8 +210,8 @@ def bootstrap_admin(payload: AuthBootstrap, x_bootstrap_token: str | None = Head
 
 
 @app.post("/api/v1/auth/login")
-def operator_login(payload: AuthLogin, db: Session = Depends(get_db)):
-    user = db.scalar(select(OperatorUser).where(OperatorUser.username == payload.username))
+def operator_login(payload: AuthLogin, response: Response, db: Session = Depends(get_db)):
+    user = db.scalar(select(OperatorUser).where(OperatorUser.username == payload.username).with_for_update())
     if user is None:
         verify_password(payload.password, _DUMMY_PASSWORD_HASH)
         raise HTTPException(status_code=401, detail="Invalid username or password")
@@ -216,7 +236,8 @@ def operator_login(payload: AuthLogin, db: Session = Depends(get_db)):
     db.add(session)
     _audit(db, user.id, "login_succeeded", user.username)
     db.commit()
-    return {"access_token": raw_token, "token_type": "bearer", "expires_at": session.expires_at, "user": {"id": user.id, "username": user.username, "role": user.role}}
+    response.set_cookie(key="wasteops_session", value=raw_token, max_age=8 * 60 * 60, httponly=True, secure=settings.app_env.strip().lower() == "production", samesite="strict", path="/api/v1")
+    return {"expires_at": session.expires_at, "user": {"id": user.id, "username": user.username, "role": user.role}}
 
 
 @app.get("/api/v1/auth/me", dependencies=[Depends(require_operator)])
@@ -225,19 +246,20 @@ def operator_identity(principal: dict = Depends(get_current_operator)):
 
 
 @app.post("/api/v1/auth/logout", dependencies=[Depends(require_operator)])
-def operator_logout(principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
+def operator_logout(response: Response, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
     if principal["session_id"]:
         session = db.get(OperatorSession, principal["session_id"])
         if session and session.revoked_at is None:
             session.revoked_at = datetime.now(timezone.utc)
             _audit(db, principal["user_id"], "logout", principal["username"])
             db.commit()
+    response.delete_cookie(key="wasteops_session", path="/api/v1", httponly=True, secure=settings.app_env.strip().lower() == "production", samesite="strict")
     return {"logged_out": True}
 
 
 @app.post("/api/v1/auth/change-password", dependencies=[Depends(require_operator)])
 def change_operator_password(payload: AuthPasswordChange, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
-    user = db.get(OperatorUser, principal["user_id"])
+    user = db.scalar(select(OperatorUser).where(OperatorUser.id == principal["user_id"]).with_for_update())
     if not user or not user.active or not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     if payload.current_password == payload.new_password:
@@ -245,11 +267,15 @@ def change_operator_password(payload: AuthPasswordChange, principal: dict = Depe
     user.password_hash = hash_password(payload.new_password)
     now = datetime.now(timezone.utc)
     for session in db.scalars(select(OperatorSession).where(OperatorSession.operator_user_id == user.id, OperatorSession.revoked_at.is_(None))):
-        if session.id != principal["session_id"]:
-            session.revoked_at = now
+        session.revoked_at = now
+    raw_token = token_urlsafe(48)
+    renewed = OperatorSession(id=str(uuid4()), operator_user_id=user.id, token_hash=hash_session_token(raw_token), expires_at=now + timedelta(hours=8))
+    db.add(renewed)
     _audit(db, user.id, "password_changed", user.username)
     db.commit()
-    return {"password_changed": True, "other_sessions_revoked": True}
+    response = Response()
+    response.set_cookie(key="wasteops_session", value=raw_token, max_age=8 * 60 * 60, httponly=True, secure=settings.app_env.strip().lower() == "production", samesite="strict", path="/api/v1")
+    return response
 
 
 @app.get("/api/v1/auth/users", dependencies=[Depends(require_admin)])
@@ -276,12 +302,19 @@ def create_operator_user(payload: OperatorUserCreate, principal: dict = Depends(
 
 @app.post("/api/v1/auth/users/{username}/revoke", dependencies=[Depends(require_admin)])
 def revoke_operator_user(username: str, principal: dict = Depends(get_current_operator), db: Session = Depends(get_db)):
-    user = db.scalar(select(OperatorUser).where(OperatorUser.username == username))
+    user = db.scalar(select(OperatorUser).where(OperatorUser.username == username).with_for_update())
     if not user:
         raise HTTPException(status_code=404, detail="Unknown operator account")
     if user.active and user.role == "admin":
-        active_admins = int(db.scalar(select(func.count()).select_from(OperatorUser).where(OperatorUser.active.is_(True), OperatorUser.role == "admin")) or 0)
-        if active_admins <= 1:
+        # Lock the active-admin set so concurrent revocations cannot each
+        # observe two admins and leave the system with none.
+        active_admin_ids = list(db.scalars(
+            select(OperatorUser.id)
+            .where(OperatorUser.active.is_(True), OperatorUser.role == "admin")
+            .order_by(OperatorUser.id)
+            .with_for_update()
+        ))
+        if user.id in active_admin_ids and len(active_admin_ids) <= 1:
             raise HTTPException(status_code=409, detail="Cannot revoke the last active administrator")
     user.active = False
     now = datetime.now(timezone.utc)
@@ -308,28 +341,7 @@ def readiness(db: Session = Depends(get_db)):
         db.execute(select(1))
     except Exception as exc:
         raise HTTPException(503, "Database is not ready") from exc
-
-    if settings.app_env.strip().lower() == "production":
-        try:
-            revision = db.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
-        except Exception as exc:
-            raise HTTPException(503, "Database migrations have not been applied") from exc
-        if revision != EXPECTED_SCHEMA_REVISION:
-            raise HTTPException(503, "Database schema is not at the expected migration revision")
-        bootstrap_complete = db.get(OperatorBootstrap, "initial_admin") is not None
-        return {
-            "status": "ready",
-            "database": "connected",
-            "schema_revision": revision,
-            "operator_auth": "named_sessions",
-            "bootstrap_status": "complete" if bootstrap_complete else "pending",
-        }
-
-    return {
-        "status": "ready",
-        "database": "connected",
-        "schema_revision": "development-auto-create" if settings.auto_create_schema else "external-migrations",
-    }
+    return {"status": "ready", "database": "connected"}
 
 @app.post("/api/v1/bins", response_model=BinOut, dependencies=[Depends(require_operator)], status_code=201)
 def create_bin(payload: BinCreate, db: Session = Depends(get_db)):
@@ -340,6 +352,72 @@ def create_bin(payload: BinCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(row)
     return row
+
+@app.get("/api/v1/bins/nearby", dependencies=[Depends(require_operator)])
+def nearby_bins(
+    latitude: float = Query(..., ge=-90, le=90),
+    longitude: float = Query(..., ge=-180, le=180),
+    radius_meters: float = Query(1000, gt=0, le=50000),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """Find active bins within a radius; use the PostGIS GiST index on PostgreSQL."""
+    if db.get_bind().dialect.name == "postgresql":
+        point = "ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography"
+        location = "ST_SetSRID(ST_MakePoint(b.longitude, b.latitude), 4326)::geography"
+        rows = db.execute(
+            text(
+                f"SELECT b.id, ST_Distance({location}, {point}) AS distance_meters "
+                f"FROM bins AS b WHERE b.active IS TRUE "
+                f"AND ST_DWithin({location}, {point}, :radius_meters) "
+                "ORDER BY distance_meters ASC, b.id ASC LIMIT :limit"
+            ),
+            {
+                "latitude": latitude,
+                "longitude": longitude,
+                "radius_meters": radius_meters,
+                "limit": limit,
+            },
+        ).all()
+        distances = {row.id: float(row.distance_meters) for row in rows}
+        ids = [row.id for row in rows]
+        bins_by_id = {
+            row.id: row
+            for row in db.scalars(select(Bin).where(Bin.id.in_(ids)))
+        } if ids else {}
+        ordered = [(bins_by_id[bin_id], distances[bin_id]) for bin_id in ids if bin_id in bins_by_id]
+    else:
+        # SQLite test/dev fallback; production PostgreSQL uses indexed PostGIS.
+        origin_lat, origin_lon = radians(latitude), radians(longitude)
+        ordered = []
+        for row in db.scalars(select(Bin).where(Bin.active.is_(True))):
+            target_lat, target_lon = radians(row.latitude), radians(row.longitude)
+            delta_lat, delta_lon = target_lat - origin_lat, target_lon - origin_lon
+            haversine = (
+                sin(delta_lat / 2) ** 2
+                + cos(origin_lat) * cos(target_lat) * sin(delta_lon / 2) ** 2
+            )
+            distance = 2 * 6_371_008.8 * asin(min(1.0, sqrt(haversine)))
+            if distance <= radius_meters:
+                ordered.append((row, distance))
+        ordered.sort(key=lambda item: (item[1], item[0].id))
+        ordered = ordered[:limit]
+    return [
+        {
+            "id": row.id,
+            "latitude": row.latitude,
+            "longitude": row.longitude,
+            "capacity_liters": row.capacity_liters,
+            "criticality": row.criticality,
+            "active": row.active,
+            "source": row.source,
+            "last_emptied_at": row.last_emptied_at,
+            "created_at": row.created_at,
+            "distance_meters": round(distance, 2),
+        }
+        for row, distance in ordered
+    ]
+
 
 @app.get("/api/v1/bins", response_model=list[BinOut], dependencies=[Depends(require_operator)])
 def list_bins(db: Session = Depends(get_db)):
@@ -818,9 +896,8 @@ def driver_transition(
     previous = job.status
     job.status = payload.status
     if payload.status == "completed":
-        bin_row = db.get(Bin, job.bin_id)
-        if bin_row:
-            bin_row.last_emptied_at = datetime.now(timezone.utc)
+        # A driver completion is pending operator verification. Only the
+        # verified lifecycle transition updates the bin's emptying timestamp.
         _release_vehicle_if_idle(db, driver.vehicle_id)
     if payload.status == "exception":
         _release_vehicle_if_idle(db, driver.vehicle_id)

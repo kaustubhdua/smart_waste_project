@@ -294,31 +294,30 @@ test("operator can sign in with a named account, use an expiring session and sig
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        access_token: "opaque-session-for-browser-test",
-        token_type: "bearer",
         expires_at: "2026-11-08T12:00:00Z",
         user: { id: "user-1", username: "ops.dispatch", role: "operator" },
       }),
+      headers: { "Set-Cookie": "wasteops_session=opaque-session-for-browser-test; Path=/api/v1; HttpOnly; SameSite=Strict" },
     });
   });
   await page.route("**/api/v1/auth/me", async route => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "user-1", username: "ops.dispatch", role: "operator" }) });
   });
   await page.route("**/api/v1/bins", async route => {
-    observed.push(route.request().headers()["authorization"]);
+    observed.push(route.request().headers()["cookie"]);
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
   await page.route("**/api/v1/jobs**", async route => {
-    observed.push(route.request().headers()["authorization"]);
+    observed.push(route.request().headers()["cookie"]);
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
   await page.route("**/api/v1/vehicles", async route => {
-    observed.push(route.request().headers()["authorization"]);
+    observed.push(route.request().headers()["cookie"]);
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
   await page.route("**/api/v1/auth/logout", async route => {
-    observed.push(route.request().headers()["authorization"]);
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ logged_out: true }) });
+    observed.push(route.request().headers()["cookie"]);
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ logged_out: true }), headers: { "Set-Cookie": "wasteops_session=; Path=/api/v1; Max-Age=0; HttpOnly; SameSite=Strict" } });
   });
 
   await page.goto("/");
@@ -327,13 +326,20 @@ test("operator can sign in with a named account, use an expiring session and sig
   await page.getByRole("button", { name: "Connect & load bins" }).click();
   await expect(page.getByRole("status")).toContainText(/Loaded 0 bins from API/i);
   expect(observed.length).toBeGreaterThan(0);
-  expect(observed.every(value => value === "Bearer opaque-session-for-browser-test")).toBe(true);
-  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBe("opaque-session-for-browser-test");
+  expect(observed.every(value => value?.includes("wasteops_session=opaque-session-for-browser-test"))).toBe(true);
+  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+  expect(await page.evaluate(() => document.cookie)).not.toContain("wasteops_session");
   await expect(page.locator("#operatorUsersPanel")).toBeHidden();
+  await expect(page.locator("#deviceAdminPanel")).toBeHidden();
+  await expect(page.locator("#driverAdminPanel")).toBeHidden();
   await expect(page.locator("#passwordPanel")).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Connect & load bins" }).click();
+  await expect(page.getByRole("status")).toContainText(/Loaded 0 bins from API/i);
+  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("status")).toContainText(/Signed out/i);
-  expect(await page.evaluate(() => sessionStorage.getItem("wasteops-session"))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
 });
 
 
@@ -345,11 +351,10 @@ test("administrator can provision and revoke operator accounts from the console"
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        access_token: "admin-session",
-        token_type: "bearer",
         expires_at: "2026-11-08T12:00:00Z",
         user: { id: "admin-1", username: "rootadmin", role: "admin" },
       }),
+      headers: { "Set-Cookie": "wasteops_session=admin-session; Path=/api/v1; HttpOnly; SameSite=Strict" },
     });
   });
   await page.route("**/api/v1/auth/me", async route => {
@@ -368,6 +373,28 @@ test("administrator can provision and revoke operator accounts from the console"
     accounts = accounts.map(user => user.username === "field.operator" ? { ...user, active: false } : user);
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ username: "field.operator", active: false, sessions_revoked: true }) });
   });
+  let devices = [{ id: "sensor-01", bin_id: "bin-01", active: true }];
+  let drivers = [{ id: "driver-01", vehicle_id: "truck-01", active: true }];
+  await page.route("**/api/v1/devices", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(devices) });
+  });
+  await page.route("**/api/v1/drivers", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(drivers) });
+  });
+  await page.route("**/api/v1/devices/sensor-01/rotate-token", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "sensor-01", token: "new-sensor-token" }) });
+  });
+  await page.route("**/api/v1/devices/sensor-01", async route => {
+    devices = devices.map(item => ({ ...item, active: false }));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "sensor-01", active: false }) });
+  });
+  await page.route("**/api/v1/drivers/driver-01/rotate-token", async route => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "driver-01", token: "new-driver-token" }) });
+  });
+  await page.route("**/api/v1/drivers/driver-01", async route => {
+    drivers = drivers.map(item => ({ ...item, active: false }));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "driver-01", active: false }) });
+  });
   await page.route("**/api/v1/auth/change-password", async route => {
     expect(route.request().postDataJSON()).toEqual({ current_password: "old-password-123", new_password: "new-password-12345" });
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ password_changed: true, other_sessions_revoked: true }) });
@@ -381,7 +408,21 @@ test("administrator can provision and revoke operator accounts from the console"
   await page.getByLabel("Password", { exact: true }).fill("admin-password-123");
   await page.getByRole("button", { name: "Connect & load bins" }).click();
   await expect(page.locator("#operatorUsersPanel")).toBeVisible();
+  await expect(page.locator("#deviceAdminPanel")).toBeVisible();
+  await expect(page.locator("#driverAdminPanel")).toBeVisible();
   await expect(page.locator("#operatorUsers")).toContainText("rootadmin");
+  await expect(page.locator("#deviceCredentials")).toContainText("sensor-01");
+  await expect(page.locator("#driverCredentials")).toContainText("driver-01");
+  const deviceRow = page.locator("#deviceCredentials .job").filter({ hasText: "sensor-01" });
+  await deviceRow.getByRole("button", { name: "Rotate token" }).click();
+  await expect(page.locator("#credentialResult")).toContainText("new-sensor-token");
+  await deviceRow.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.locator("#deviceCredentials")).toContainText("sensor-01 · bin bin-01 · revoked");
+  const driverRow = page.locator("#driverCredentials .job").filter({ hasText: "driver-01" });
+  await driverRow.getByRole("button", { name: "Rotate token" }).click();
+  await expect(page.locator("#credentialResult")).toContainText("new-driver-token");
+  await driverRow.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.locator("#driverCredentials")).toContainText("driver-01 · vehicle truck-01 · revoked");
   await page.getByLabel("Username", { exact: true }).fill("field.operator");
   await page.getByLabel("Temporary password (12+ characters)").fill("field-operator-password");
   await page.getByLabel("Role").selectOption("operator");

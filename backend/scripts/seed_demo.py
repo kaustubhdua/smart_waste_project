@@ -1,9 +1,12 @@
 """Idempotently seed explicitly labeled demo data for local development."""
 from datetime import datetime, timedelta, timezone
+from app.config import settings
 from app.db import Base, SessionLocal, engine
 from app.models import Bin, Telemetry, Vehicle
 
 def seed():
+    if settings.app_env.strip().lower() == "production" or not settings.seed_demo_data:
+        raise RuntimeError("Demo seeding is disabled by default; set SEED_DEMO_DATA=true in a non-production environment to opt in.")
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:

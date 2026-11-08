@@ -11,6 +11,7 @@ on:
       - "README_PLATFORM.md"
       - "person2_ml_prediction.py"
       - "requirements.txt"
+      - "scripts/**"
   pull_request:
     paths:
       - "backend/**"
@@ -26,6 +27,7 @@ on:
       - "README_PLATFORM.md"
       - "person2_ml_prediction.py"
       - "requirements.txt"
+      - "scripts/**"
   workflow_dispatch:
 permissions:
   contents: read
@@ -52,7 +54,7 @@ jobs:
         run: DATABASE_URL=sqlite:///./migration_test.db alembic upgrade head
       - run: python -m compileall -q app scripts
       - name: Verify demo seed is idempotent
-        run: DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo && DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo
+        run: SEED_DEMO_DATA=true DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo && SEED_DEMO_DATA=true DATABASE_URL=sqlite:///./seed_test.db python -m scripts.seed_demo
       - name: Validate Docker Compose configuration
         working-directory: ${{ github.workspace }}
         run: POSTGRES_PASSWORD=ci-only-password API_TOKEN=ci-only-operator-token docker compose config --quiet
@@ -73,6 +75,21 @@ jobs:
           # Verify the browser-facing Nginx service proxies to the API on the private Compose network.
           curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
           curl --fail --silent --show-error -H "Authorization: Bearer ci-only-operator-token" http://127.0.0.1:8080/api/v1/operations/summary
+          # The production PostgreSQL image must enable PostGIS and create the functional GiST index.
+          docker compose exec -T db psql -U smartwaste -d smartwaste -tAc "SELECT extname FROM pg_extension WHERE extname='postgis'" | grep -qx postgis
+          docker compose exec -T db psql -U smartwaste -d smartwaste -tAc "SELECT indexname FROM pg_indexes WHERE indexname='ix_bins_geography_gist'" | grep -qx ix_bins_geography_gist
+          # Exercise the actual PostGIS radius query through the same-origin web proxy.
+          curl --fail --silent --show-error -X POST http://127.0.0.1:8080/api/v1/bins -H "Authorization: Bearer ci-only-operator-token" -H "Content-Type: application/json" -d '{"id":"ci-near-center","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}'
+          curl --fail --silent --show-error -X POST http://127.0.0.1:8080/api/v1/bins -H "Authorization: Bearer ci-only-operator-token" -H "Content-Type: application/json" -d '{"id":"ci-nearby","latitude":28.601,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}'
+          curl --fail --silent --show-error -G http://127.0.0.1:8080/api/v1/bins/nearby --data-urlencode latitude=28.6 --data-urlencode longitude=77.2 --data-urlencode radius_meters=500 -H "Authorization: Bearer ci-only-operator-token" | jq -e 'length == 2 and .[0].id == "ci-near-center" and .[1].id == "ci-nearby" and .[1].distance_meters > 100 and .[1].distance_meters < 120'
+          # Prove a custom-format backup can be restored transactionally without retaining writes made after the snapshot.
+          backup_file="/tmp/smartwaste-ci-restore.dump"
+          rm -f "$backup_file"
+          POSTGRES_USER=smartwaste POSTGRES_DB=smartwaste bash scripts/backup-postgres.sh "$backup_file"
+          curl --fail --silent --show-error -X POST http://127.0.0.1:8080/api/v1/bins -H "Authorization: Bearer ci-only-operator-token" -H "Content-Type: application/json" -d '{"id":"ci-restore-marker","latitude":28.62,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}'
+          CONFIRM_RESTORE=YES POSTGRES_USER=smartwaste POSTGRES_DB=smartwaste bash scripts/restore-postgres.sh "$backup_file"
+          curl --fail --silent --show-error -H "Authorization: Bearer ci-only-operator-token" http://127.0.0.1:8080/api/v1/bins | jq -e 'all(.[]; .id != "ci-restore-marker")'
+          rm -f "$backup_file"
           curl --fail --silent --show-error http://127.0.0.1:8080/ > /dev/null
           curl --fail --silent --show-error http://127.0.0.1:8080/driver.html > /dev/null
           headers="$(curl --fail --silent --show-error -I http://127.0.0.1:8080/)"
@@ -105,3 +122,4 @@ jobs:
           ! grep -Eq '<script[[:space:]]*>' web/index.html web/driver.html
           node --check web/operator.js
           node --check web/driver.js
+          bash -n scripts/backup-postgres.sh scripts/restore-postgres.sh

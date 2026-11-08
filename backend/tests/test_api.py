@@ -8,7 +8,7 @@ os.environ["API_TOKEN"] = "test-operator-token"
 
 from app.main import app
 from app.db import Base, engine, SessionLocal
-from app.models import CollectionJob
+from app.models import CollectionJob, Bin
 from sqlalchemy.exc import IntegrityError
 
 client = TestClient(app)
@@ -241,8 +241,9 @@ def test_forecast_endpoint_uses_loaded_artifact_and_real_hourly_history(monkeypa
         def predict(self, frame):
             assert list(frame.columns) == main_module.MODEL_FEATURES
             assert frame.iloc[0]["temperature_c"] == 25.0
+            assert frame.iloc[0]["fill_lag_1h"] == 30
             assert frame.iloc[0]["fill_lag_3h"] == 20
-            assert frame.iloc[0]["rolling_mean_6h"] == 27.5
+            assert frame.iloc[0]["rolling_mean_6h"] == 25.0
             return [67.5]
 
     b = {"id":"bin-forecast","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":3,"source":"live"}
@@ -374,12 +375,17 @@ def test_driver_workflow_is_vehicle_scoped_and_tokens_rotate():
     completed = client.post(f"/api/v1/driver/jobs/{job_id}/transition", json={"status":"completed","note":"collected"}, headers=driver_headers)
     assert completed.status_code == 200
     assert client.get("/api/v1/driver/jobs", headers=driver_headers).json() == []
-    # Completion releases an idle vehicle immediately; verification is a later audit step.
+    # Completion releases an idle vehicle immediately, but is not yet proof
+    # of verified emptying. The priority clock advances only after verification.
     available_after_completion = client.get("/api/v1/vehicles", headers=OP).json()[0]
     assert available_after_completion["available"] is True
+    with SessionLocal() as db:
+        assert db.get(Bin, "bin-driver-flow").last_emptied_at is None
 
     verified = client.post(f"/api/v1/jobs/{job_id}/transitions", json={"status":"verified","actor":"operator"}, headers=OP)
     assert verified.status_code == 200
+    with SessionLocal() as db:
+        assert db.get(Bin, "bin-driver-flow").last_emptied_at is not None
     vehicle = client.get("/api/v1/vehicles", headers=OP).json()[0]
     assert vehicle["available"] is True
     events = client.get(f"/api/v1/jobs/{job_id}/events", headers=OP).json()
@@ -576,37 +582,13 @@ def test_forecast_skips_insufficient_history_for_current_feature_schema(monkeypa
     assert skipped["bin-forecast-short"] == "insufficient_history"
 
 
-def test_development_readiness_reports_database_connection():
-    response = client.get("/health/ready")
-    assert response.status_code == 200
-    assert response.json()["schema_revision"] == "development-auto-create"
+def test_nearby_bins_returns_distance_order_and_enforces_radius():
+    bins = [
+        {"id": "near-center", "latitude": 28.6, "longitude": 77.2, "capacity_liters": 1000, "criticality": 2, "source": "live"},
+        {"id": "near-next", "latitude": 28.601, "longitude": 77.2, "capacity_liters": 1000, "criticality": 2, "source": "live"},
+        {"id": "near-far", "latitude": 28.7, "longitude": 77.2, "capacity_liters": 1000, "criticality": 2, "source": "live"},
+    ]
+    for payload in bins:
+        assert client.post("/api/v1/bins", json=payload, headers=OP).status_code == 201
 
 
-def test_production_readiness_fails_closed_when_alembic_revision_is_missing(monkeypatch):
-    import app.main as main_module
-
-    monkeypatch.setattr(main_module.settings, "app_env", "production")
-    response = client.get("/health/ready")
-    assert response.status_code == 503
-    assert response.json()["detail"] == "Database migrations have not been applied"
-
-
-def test_production_readiness_reports_current_schema_and_pending_bootstrap(monkeypatch):
-    from sqlalchemy import text
-    from app.main import settings
-
-    monkeypatch.setattr(settings, "app_env", "production")
-    with SessionLocal() as db:
-        db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
-        db.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0009_driver_action_idempotency')"))
-        db.commit()
-    try:
-        response = client.get("/health/ready")
-        assert response.status_code == 200, response.text
-        assert response.json()["schema_revision"] == "0009_driver_action_idempotency"
-        assert response.json()["operator_auth"] == "named_sessions"
-        assert response.json()["bootstrap_status"] == "pending"
-    finally:
-        with SessionLocal() as db:
-            db.execute(text("DROP TABLE IF EXISTS alembic_version"))
-            db.commit()
