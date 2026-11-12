@@ -50,7 +50,7 @@ Driver transition requests accept an `Idempotency-Key` header. The database stor
 
 ## Data truthfulness
 
-Every bin has a `source` of `live`, `imported`, or `demo`. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. Routing uses real road-network distance/time data; if the provider fails, the API returns an error rather than fabricating distances. The API serves next-observation forecasts when a trained artifact and suitable telemetry are available; no field-performance claims are made. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.
+Every bin has a `source` of `live`, `imported`, or `demo`. The operator interface only offers live and imported records, excludes demo-source bins from operational views, and the API rejects demo-source bin creation in production. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. Routing uses real road-network distance/time data; if the provider fails, the API returns an error rather than fabricating distances. The API serves next-observation forecasts when a trained artifact and suitable telemetry are available; no field-performance claims are made. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.
 
 ## Production configuration guardrails
 
