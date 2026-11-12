@@ -316,12 +316,12 @@ with right:
 # Overview
 # ---------------------------------------------------------------------------
 if selected == "Overview":
-    st.markdown('<div class="section-head"><span>Live operations snapshot</span><span>Updated just now</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-head"><span>Operations snapshot</span><span>Current workspace</span></div>', unsafe_allow_html=True)
     c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Bins monitored",len(bins),"+2 this week")
-    c2.metric("Requiring pickup",len(needs),f"{len(attention)} approaching threshold")
-    c3.metric("Active collections",len(active_jobs),f"{len(completed)} completed today")
-    c4.metric("Average fill level",f"{avg_fill:.0f}%","Across all collection points")
+    c1.metric("Bins monitored",len(bins),help="Collection points in the current workspace.")
+    c2.metric("Requiring pickup",len(needs),help=f"{len(attention)} additional points are approaching the service threshold.")
+    c3.metric("Active collections",len(active_jobs),help=f"{len(completed)} jobs are marked completed in this workspace.")
+    c4.metric("Average fill level",f"{avg_fill:.0f}%",help="Average across the collection points in this workspace.")
     a,b = st.columns([1.65,1])
     with a:
         st.markdown('<div class="section-head"><span>Collection point activity</span><span>Service area</span></div>', unsafe_allow_html=True)
@@ -424,11 +424,11 @@ elif selected == "Route planner":
             elif max(b["capacity_l"]*b["fill_pct"]/100 for b in candidates)>min(v["capacity_l"] for v in available): st.error("A collection point exceeds available vehicle capacity. Adjust the threshold or fleet.")
             else:
                 ok,message=make_route_plan(threshold)
-                for v,capacity in zip(available,original_capacities):v["capacity_l"]=capacity
                 if ok:
                     log_event("Collection routes optimized · "+str(len(data["routes"]))+" vehicles assigned")
                     st.success(message)
                 else:st.error(message)
+            for v,capacity in zip(available,original_capacities):v["capacity_l"]=capacity
     with r2:
         st.markdown('<div class="section-head"><span>Service area map</span></div>',unsafe_allow_html=True)
         route_lines={v:r["bins"] for v,r in data["routes"].items()}
