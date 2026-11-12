@@ -693,5 +693,5 @@ def test_operator_and_driver_consoles_are_served_from_api_origin():
 
 
 def test_api_responses_are_not_cacheable():
-    response = client.get("/health")
+    response = client.get("/api/v1/auth/me")
     assert response.headers["cache-control"] == "no-store, private"
