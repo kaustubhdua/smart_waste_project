@@ -1079,7 +1079,7 @@ async def production_response_headers(request: Request, call_next):
         "font-src 'self' data: https://unpkg.com; connect-src 'self' https:; upgrade-insecure-requests"
     )
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["Pragma"] = "no-cache"
