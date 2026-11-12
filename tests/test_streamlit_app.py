@@ -1,11 +1,14 @@
 import unittest
+from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class WasteOpsStreamlitTests(unittest.TestCase):
     def test_every_workspace_page_renders(self):
-        app = AppTest.from_file("app.py", default_timeout=45).run()
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=45).run()
         self.assertFalse(app.exception, str(app.exception))
 
         for page in (
@@ -21,7 +24,7 @@ class WasteOpsStreamlitTests(unittest.TestCase):
             self.assertFalse(app.exception, f"{page}: {app.exception}")
 
     def test_route_planner_builds_capacity_safe_vehicle_routes(self):
-        app = AppTest.from_file("app.py", default_timeout=60).run()
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
         app.session_state["active_page"] = "Route planner"
         app.run()
         self.assertFalse(app.exception, str(app.exception))
