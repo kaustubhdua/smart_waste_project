@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from math import asin, cos, radians, sin, sqrt
 from uuid import uuid4
 
+import json
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -206,8 +207,8 @@ def build_map(selected_ids=None, route_lines=None, height=480):
     return m
 
 
-def make_route_plan():
-    candidates = sorted([b for b in bins if b["fill_pct"] >= 65], key=priority_score, reverse=True)
+def make_route_plan(threshold: int = 65):
+    candidates = sorted([b for b in bins if b["fill_pct"] >= threshold], key=priority_score, reverse=True)
     if not candidates:
         data["routes"] = {}
         data["route_order"] = []
@@ -257,6 +258,27 @@ with st.sidebar:
     st.markdown(f'<div style="color:#dce9e0;font-size:13px;margin:8px 0">● <span style="color:#8fe0b2">All systems operational</span></div>', unsafe_allow_html=True)
     st.caption(f"{len(bins)} collection points · {len(vehicles)} vehicles")
     st.divider()
+    st.download_button(
+        "↓  Save workspace",
+        data=json.dumps(data, indent=2),
+        file_name="wasteops-workspace.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+    uploaded_workspace = st.file_uploader("Restore workspace", type=["json"], label_visibility="collapsed")
+    if uploaded_workspace and st.button("Restore saved workspace", use_container_width=True):
+        try:
+            restored = json.loads(uploaded_workspace.getvalue().decode("utf-8"))
+            required = {"bins", "vehicles", "jobs", "history", "routes", "route_order", "events", "next_job", "next_bin"}
+            if not isinstance(restored, dict) or not required.issubset(restored):
+                raise ValueError("Workspace file is missing required sections.")
+            if not all(isinstance(restored[key], list) for key in ("bins", "vehicles", "jobs", "history", "route_order", "events")):
+                raise ValueError("Workspace sections have an invalid format.")
+            st.session_state.wasteops = restored
+            st.success("Workspace restored.")
+            st.rerun()
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            st.error(f"Could not restore workspace: {exc}")
     if st.button("↻  Reset workspace", use_container_width=True, type="secondary"):
         st.session_state.wasteops = make_workspace()
         st.rerun()
@@ -400,11 +422,7 @@ elif selected == "Route planner":
             elif not available: st.error("No vehicles are available.")
             elif max(b["capacity_l"]*b["fill_pct"]/100 for b in candidates)>min(v["capacity_l"] for v in available): st.error("A collection point exceeds available vehicle capacity. Adjust the threshold or fleet.")
             else:
-                old=[b["fill_pct"] for b in bins]
-                for b in bins:
-                    if b["fill_pct"]<threshold:b["fill_pct"]=0
-                ok,message=make_route_plan()
-                for b,value in zip(bins,old):b["fill_pct"]=value
+                ok,message=make_route_plan(threshold)
                 for v,capacity in zip(available,original_capacities):v["capacity_l"]=capacity
                 if ok:
                     log_event("Collection routes optimized · "+str(len(data["routes"]))+" vehicles assigned")
