@@ -267,10 +267,10 @@ with st.sidebar:
         data=json.dumps(data, indent=2),
         file_name="wasteops-workspace.json",
         mime="application/json",
-        use_container_width=True,
+        width="stretch",
     )
     uploaded_workspace = st.file_uploader("Restore workspace", type=["json"], label_visibility="collapsed")
-    if uploaded_workspace and st.button("Restore saved workspace", use_container_width=True):
+    if uploaded_workspace and st.button("Restore saved workspace", width="stretch"):
         try:
             restored = json.loads(uploaded_workspace.getvalue().decode("utf-8"))
             required = {"bins", "vehicles", "jobs", "history", "routes", "route_order", "events", "next_job", "next_bin"}
@@ -283,7 +283,7 @@ with st.sidebar:
             st.rerun()
         except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             st.error(f"Could not restore workspace: {exc}")
-    if st.button("↻  Reset workspace", use_container_width=True, type="secondary"):
+    if st.button("↻  Reset workspace", width="stretch", type="secondary"):
         st.session_state.wasteops = make_workspace()
         st.rerun()
     st.caption("WasteOps · Collection operations")
@@ -371,7 +371,7 @@ elif selected == "Bin network":
         table=pd.DataFrame(filtered)
         if not table.empty:
             table["priority"]=table.apply(lambda r:priority_score(r.to_dict()),axis=1)
-            st.dataframe(table[["id","area","type","fill_pct","capacity_l","status","priority","battery_pct"]].rename(columns={"id":"Bin ID","area":"Area","type":"Waste type","fill_pct":"Fill %","capacity_l":"Capacity (L)","status":"Status","priority":"Priority","battery_pct":"Battery %"}),use_container_width=True,hide_index=True)
+            st.dataframe(table[["id","area","type","fill_pct","capacity_l","status","priority","battery_pct"]].rename(columns={"id":"Bin ID","area":"Area","type":"Waste type","fill_pct":"Fill %","capacity_l":"Capacity (L)","status":"Status","priority":"Priority","battery_pct":"Battery %"}),width="stretch",hide_index=True)
     st.markdown('<div class="section-head"><span>Collection point controls</span></div>',unsafe_allow_html=True)
     ids=[b["id"] for b in bins]
     with st.form("bin_update_form"):
@@ -415,7 +415,7 @@ elif selected == "Route planner":
         threshold=st.slider("Collection threshold",40,95,65,5)
         active_vehicle_count=st.slider("Vehicles to deploy",1,max(1,len([v for v in vehicles if v["available"]])),min(3,max(1,len([v for v in vehicles if v["available"]]))))
         capacity_override=st.selectbox("Vehicle capacity",["Use fleet capacity","600 L","900 L","1,200 L","1,500 L"])
-        if st.button("✦  Optimize collection routes",use_container_width=True):
+        if st.button("✦  Optimize collection routes",width="stretch"):
             candidates=[b for b in bins if b["fill_pct"]>=threshold]
             available=[v for v in vehicles if v["available"]][:active_vehicle_count]
             cap = int(capacity_override.replace(" L","").replace(",","")) if capacity_override!="Use fleet capacity" else None
@@ -465,7 +465,7 @@ elif selected == "Collection jobs":
     filtered=[j for j in jobs if (job_status=="All" or j["status"]==job_status) and (not job_search or job_search.lower() in j["id"].lower() or job_search.lower() in j["bin_id"].lower())]
     q1,q2,q3=st.columns(3)
     q1.metric("Total jobs",len(jobs));q2.metric("In progress",sum(j["status"]=="In progress" for j in jobs));q3.metric("Completed",len(completed))
-    st.dataframe(pd.DataFrame(filtered).rename(columns={"id":"Job ID","bin_id":"Bin","area":"Area","priority":"Priority","status":"Status","vehicle":"Vehicle","created":"Created"}),use_container_width=True,hide_index=True)
+    st.dataframe(pd.DataFrame(filtered).rename(columns={"id":"Job ID","bin_id":"Bin","area":"Area","priority":"Priority","status":"Status","vehicle":"Vehicle","created":"Created"}),width="stretch",hide_index=True)
     st.markdown('<div class="section-head"><span>Update collection job</span></div>',unsafe_allow_html=True)
     pending=[j for j in jobs if j["status"]!="Completed"]
     if pending:
