@@ -32,8 +32,22 @@ def solve_vrp(bins_data, num_vehicles=2, vehicle_capacity=1000):
         raise TypeError("bins_data must be a list")
     if not isinstance(num_vehicles, int) or isinstance(num_vehicles, bool) or num_vehicles < 1:
         raise ValueError("num_vehicles must be a positive integer")
-    if not isinstance(vehicle_capacity, (int, float)) or isinstance(vehicle_capacity, bool) or not np.isfinite(vehicle_capacity) or vehicle_capacity <= 0:
-        raise ValueError("vehicle_capacity must be a positive finite number")
+    if isinstance(vehicle_capacity, (list, tuple)):
+        if len(vehicle_capacity) != num_vehicles:
+            raise ValueError("vehicle_capacity list must match num_vehicles")
+        if any(
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not np.isfinite(value)
+            or value <= 0
+            for value in vehicle_capacity
+        ):
+            raise ValueError("every vehicle capacity must be a positive finite number")
+        vehicle_capacities = list(vehicle_capacity)
+    else:
+        if not isinstance(vehicle_capacity, (int, float)) or isinstance(vehicle_capacity, bool) or not np.isfinite(vehicle_capacity) or vehicle_capacity <= 0:
+            raise ValueError("vehicle_capacity must be a positive finite number or a per-vehicle list")
+        vehicle_capacities = [vehicle_capacity] * num_vehicles
     if not bins_data:
         return {}
 
@@ -65,7 +79,7 @@ def solve_vrp(bins_data, num_vehicles=2, vehicle_capacity=1000):
     data = {
         "distance_matrix": distance_matrix,
         "demands": demands,
-        "vehicle_capacities": [vehicle_capacity] * num_vehicles,
+        "vehicle_capacities": vehicle_capacities,
         "num_vehicles": num_vehicles,
         "depot": 0,
     }
