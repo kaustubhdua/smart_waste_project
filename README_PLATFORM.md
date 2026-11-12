@@ -25,7 +25,7 @@ pip install -r requirements.txt
 API_TOKEN=test-operator-token pytest -q
 ```
 
-The API defaults to a local SQLite database for development. Docker Compose configures PostgreSQL/PostGIS. Alembic migrations are applied automatically by the API container. Use a managed secret store before production.
+The API defaults to a local SQLite database for development. Docker Compose configures PostgreSQL/PostGIS. The Render production container serves both `web/index.html` and `web/driver.html` from the same HTTPS origin as FastAPI, so browser session cookies remain same-site. Alembic migrations are applied automatically by the API container. Use a managed secret store before production.
 
 ## Optional ML model artifact
 
@@ -54,4 +54,4 @@ Every bin has a `source` of `live`, `imported`, or `demo`. The operator interfac
 
 ## Production configuration guardrails
 
-Set `APP_ENV=production` to make the API refuse unsafe startup configuration. Production requires a non-SQLite durable database, a unique `API_TOKEN` of at least 32 characters for one-time initial-admin bootstrap, `AUTO_CREATE_SCHEMA=false`, `SEED_DEMO_DATA=false`, a trusted HTTPS routing provider, and explicit trusted HTTPS origins in `CORS_ORIGINS`. Apply schema changes through Alembic migrations. Compose publishes database, API, and web ports on loopback by default and includes readiness/health checks; keep these binds local and terminate TLS at a properly configured reverse proxy. The guard prevents common misconfiguration; it is not a substitute for MFA/SSO decisions, trusted-proxy rate-limit configuration, managed secrets, backups, monitoring, and a security review.
+Set `APP_ENV=production` to make the API refuse unsafe startup configuration. Production requires a non-SQLite durable database, a unique `API_TOKEN` of at least 32 characters for one-time initial-admin bootstrap, `AUTO_CREATE_SCHEMA=false`, `SEED_DEMO_DATA=false`, a trusted HTTPS routing provider, and explicit trusted HTTPS origins in `CORS_ORIGINS`. The deployment supports the authenticated HeiGIT openrouteservice v2 API (`ROUTING_PROVIDER=ors`, `ORS_BASE_URL=https://api.heigit.org/openrouteservice/v2`, secret `ORS_API_KEY`) as well as a trusted OSRM-compatible endpoint. The public OSRM demonstration server is rejected in production. Apply schema changes through Alembic migrations. Compose publishes database, API, and web ports on loopback by default and includes readiness/health checks; keep these binds local and terminate TLS at a properly configured reverse proxy. The guard prevents common misconfiguration; it is not a substitute for MFA/SSO decisions, trusted-proxy rate-limit configuration, managed secrets, backups, monitoring, and a security review.

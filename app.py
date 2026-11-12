@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-CONSOLE_URL = os.getenv("WASTEOPS_CONSOLE_URL", "").strip()
+CONSOLE_URL = os.getenv("WASTEOPS_CONSOLE_URL", "https://wasteops-production.onrender.com").strip()
 
 st.markdown(
     """

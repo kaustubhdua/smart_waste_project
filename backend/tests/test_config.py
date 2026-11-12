@@ -21,6 +21,24 @@ def test_production_configuration_accepts_explicit_safe_settings():
     validate_production_settings(production_settings())
 
 
+def test_production_configuration_accepts_authenticated_ors():
+    validate_production_settings(production_settings(
+        routing_provider="ors",
+        ors_base_url="https://api.heigit.org/openrouteservice/v2",
+        ors_api_key="test-managed-key",
+    ))
+
+
+@pytest.mark.parametrize("override", [
+    {"routing_provider": "ors"},
+    {"routing_provider": "ors", "ors_base_url": "https://api.openrouteservice.org/v2", "ors_api_key": "key"},
+    {"routing_provider": "unknown"},
+])
+def test_production_configuration_rejects_untrusted_ors_settings(override):
+    with pytest.raises(RuntimeError, match="Unsafe production configuration"):
+        validate_production_settings(production_settings(**override))
+
+
 @pytest.mark.parametrize(
     "override",
     [
@@ -64,3 +82,11 @@ def test_demo_data_is_opt_in_by_default(monkeypatch):
     monkeypatch.delenv("SEED_DEMO_DATA", raising=False)
     config = Settings(_env_file=None)
     assert config.seed_demo_data is False
+
+
+def test_render_postgres_urls_select_psycopg_v3():
+    from app.db import normalize_database_url
+
+    assert normalize_database_url("postgresql://user:pass@host:5432/db") == "postgresql+psycopg://user:pass@host:5432/db"
+    assert normalize_database_url("postgres://user:pass@host:5432/db") == "postgresql+psycopg://user:pass@host:5432/db"
+    assert normalize_database_url("sqlite:///./local.db") == "sqlite:///./local.db"
