@@ -259,7 +259,7 @@ with st.sidebar:
     selected = st.radio("Navigation", pages, label_visibility="collapsed", key="active_page")
     st.divider()
     st.markdown('<div class="eyebrow">Operations status</div>', unsafe_allow_html=True)
-    st.markdown(f'<div style="color:#dce9e0;font-size:13px;margin:8px 0">● <span style="color:#8fe0b2">All systems operational</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="color:#dce9e0;font-size:13px;margin:8px 0">● <span style="color:#8fe0b2">Workspace ready</span></div>', unsafe_allow_html=True)
     st.caption(f"{len(bins)} collection points · {len(vehicles)} vehicles")
     st.divider()
     st.download_button(
