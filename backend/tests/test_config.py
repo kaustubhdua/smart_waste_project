@@ -83,3 +83,11 @@ def test_demo_data_is_opt_in_by_default(monkeypatch):
     monkeypatch.delenv("SEED_DEMO_DATA", raising=False)
     config = Settings(_env_file=None)
     assert config.seed_demo_data is False
+
+
+def test_render_postgres_urls_select_psycopg_v3():
+    from app.db import normalize_database_url
+
+    assert normalize_database_url("postgresql://user:pass@host:5432/db") == "postgresql+psycopg://user:pass@host:5432/db"
+    assert normalize_database_url("postgres://user:pass@host:5432/db") == "postgresql+psycopg://user:pass@host:5432/db"
+    assert normalize_database_url("sqlite:///./local.db") == "sqlite:///./local.db"
