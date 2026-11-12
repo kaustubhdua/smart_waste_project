@@ -198,11 +198,12 @@ def build_map(selected_ids=None, route_lines=None, height=480):
             tooltip=f'{row["id"]} · {row["fill_pct"]:.0f}% full',
             popup=f'<b>{row["id"]}</b><br>{row["area"]}<br>{row["fill_pct"]:.1f}% full<br>{row["capacity_l"]} L',
         ).add_to(m)
-    for vehicle, ordered in (route_lines or {}).items():
+    route_colors = ["#73d7a0","#69aee8","#e6b65f","#c28be8"]
+    for route_index, (vehicle, ordered) in enumerate((route_lines or {}).items()):
         coords = [DEPOT] + [[next(b for b in bins if b["id"] == bid)["latitude"],
                               next(b for b in bins if b["id"] == bid)["longitude"]] for bid in ordered] + [DEPOT]
         if len(coords) > 2:
-            folium.PolyLine(coords, color=["#73d7a0","#69aee8","#e6b65f","#c28be8"][int(vehicle[-1])-1],
+            folium.PolyLine(coords, color=route_colors[route_index % len(route_colors)],
                             weight=4, opacity=.85, tooltip=vehicle).add_to(m)
     return m
 
