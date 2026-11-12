@@ -208,13 +208,13 @@ def build_map(selected_ids=None, route_lines=None, height=480):
     return m
 
 
-def make_route_plan(threshold: int = 65, capacity_override: int | None = None):
+def make_route_plan(threshold: int = 65, capacity_override: int | None = None, selected_vehicle_ids=None):
     candidates = sorted([b for b in bins if b["fill_pct"] >= threshold], key=priority_score, reverse=True)
     if not candidates:
         data["routes"] = {}
         data["route_order"] = []
         return False, "All collection points are within their service thresholds."
-    vehicle_rows = [v for v in vehicles if v["available"]]
+    vehicle_rows = [v for v in vehicles if v["available"] and (selected_vehicle_ids is None or v["id"] in selected_vehicle_ids)]
     if not vehicle_rows:
         return False, "No available vehicles. Release a vehicle before planning routes."
     capacities = [
@@ -422,7 +422,7 @@ elif selected == "Route planner":
             if not candidates: st.info("No collection points currently meet this threshold.")
             elif not available: st.error("No vehicles are available.")
             else:
-                ok,message=make_route_plan(threshold,cap)
+                ok,message=make_route_plan(threshold,cap,[v["id"] for v in available])
                 if ok:
                     log_event("Collection routes optimized · "+str(len(data["routes"]))+" vehicles assigned")
                     st.success(message)
