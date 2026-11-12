@@ -1088,5 +1088,11 @@ async def production_response_headers(request: Request, call_next):
 
 
 # Serve both consoles from the API origin so browser sessions stay same-site.
-WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+_APP_PATH = Path(__file__).resolve()
+WEB_ROOT = next(
+    candidate for candidate in (
+        _APP_PATH.parents[2] / "web",
+        _APP_PATH.parents[1] / "web",
+    ) if candidate.is_dir()
+)
 app.mount("/", StaticFiles(directory=str(WEB_ROOT), html=True), name="web")
