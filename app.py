@@ -208,7 +208,7 @@ def build_map(selected_ids=None, route_lines=None, height=480):
     return m
 
 
-def make_route_plan(threshold: int = 65):
+def make_route_plan(threshold: int = 65, capacity_override: int | None = None):
     candidates = sorted([b for b in bins if b["fill_pct"] >= threshold], key=priority_score, reverse=True)
     if not candidates:
         data["routes"] = {}
@@ -217,16 +217,19 @@ def make_route_plan(threshold: int = 65):
     vehicle_rows = [v for v in vehicles if v["available"]]
     if not vehicle_rows:
         return False, "No available vehicles. Release a vehicle before planning routes."
-    capacity = min(v["capacity_l"] for v in vehicle_rows)
+    capacities = [
+        min(capacity_override, vehicle["capacity_l"]) if capacity_override else vehicle["capacity_l"]
+        for vehicle in vehicle_rows
+    ]
     demands = [max(1, int(round(b["capacity_l"] * b["fill_pct"] / 100))) for b in candidates]
-    if max(demands) > capacity:
-        return False, "A collection point exceeds the capacity of the available fleet."
+    if max(demands) > max(capacities):
+        return False, "A collection point exceeds the capacity of every available vehicle."
     try:
         optimized = solve_vrp(
             [{"latitude":b["latitude"],"longitude":b["longitude"],"waste_volume":d}
              for b,d in zip(candidates,demands)],
             num_vehicles=len(vehicle_rows),
-            vehicle_capacity=capacity,
+            vehicle_capacity=capacities,
         )
     except Exception as exc:
         return False, f"Route planning could not complete: {exc}"
@@ -237,7 +240,7 @@ def make_route_plan(threshold: int = 65):
         coords = [DEPOT] + [[next(b for b in bins if b["id"] == bid)["latitude"],
                               next(b for b in bins if b["id"] == bid)["longitude"]] for bid in route_bins] + [DEPOT]
         km = sum(distance_km(coords[i],coords[i+1]) for i in range(len(coords)-1))
-        routes[vehicle["id"]] = {"bins":route_bins,"load_l":int(result["total_load"]),"capacity_l":vehicle["capacity_l"],"distance_km":km}
+        routes[vehicle["id"]] = {"bins":route_bins,"load_l":int(result["total_load"]),"capacity_l":capacities[index],"distance_km":km}
     data["routes"] = routes
     data["route_order"] = list(routes)
     return True, f"Created {len(routes)} vehicle routes covering {sum(len(r['bins']) for r in routes.values())} collection points."
@@ -415,20 +418,15 @@ elif selected == "Route planner":
         if st.button("✦  Optimize collection routes",use_container_width=True):
             candidates=[b for b in bins if b["fill_pct"]>=threshold]
             available=[v for v in vehicles if v["available"]][:active_vehicle_count]
-            original_capacities=[v["capacity_l"] for v in available]
-            if capacity_override!="Use fleet capacity":
-                cap=int(capacity_override.replace(" L","").replace(",",""))
-                for v in available:v["capacity_l"]=min(cap,v["capacity_l"])
+            cap = int(capacity_override.replace(" L","").replace(",","")) if capacity_override!="Use fleet capacity" else None
             if not candidates: st.info("No collection points currently meet this threshold.")
             elif not available: st.error("No vehicles are available.")
-            elif max(b["capacity_l"]*b["fill_pct"]/100 for b in candidates)>min(v["capacity_l"] for v in available): st.error("A collection point exceeds available vehicle capacity. Adjust the threshold or fleet.")
             else:
-                ok,message=make_route_plan(threshold)
+                ok,message=make_route_plan(threshold,cap)
                 if ok:
                     log_event("Collection routes optimized · "+str(len(data["routes"]))+" vehicles assigned")
                     st.success(message)
                 else:st.error(message)
-            for v,capacity in zip(available,original_capacities):v["capacity_l"]=capacity
     with r2:
         st.markdown('<div class="section-head"><span>Service area map</span></div>',unsafe_allow_html=True)
         route_lines={v:r["bins"] for v,r in data["routes"].items()}
