@@ -13,6 +13,7 @@ from secrets import token_urlsafe
 from uuid import uuid4
 from fastapi import FastAPI, Depends, Header, Cookie, HTTPException, UploadFile, File, Response, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -832,7 +833,7 @@ async def optimize_route(payload: RouteRequest, db: Session = Depends(get_db)):
         raise HTTPException(422, str(exc)) from exc
     plan_id = str(uuid4())
     response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": "OSRM", "solver": optimized["solver"], "data_mode": "telemetry-derived demand; verify sensor calibration before operational use"}
-    db.add(RoutePlan(id=plan_id, depot_latitude=payload.depot_latitude, depot_longitude=payload.depot_longitude, routing_provider="OSRM", solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
+    db.add(RoutePlan(id=plan_id, depot_latitude=payload.depot_latitude, depot_longitude=payload.depot_longitude, routing_provider=settings.routing_provider.upper(), solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
     db.commit()
     return {"route_plan_id": plan_id, **response_payload}
 
@@ -1061,3 +1062,31 @@ def get_route_plan(plan_id: str, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(404, "Unknown route plan")
     return {"route_plan_id": row.id, **json.loads(row.route_payload), "created_at": row.created_at}
+
+
+@app.middleware("http")
+async def production_response_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "form-action 'self'; script-src 'self' https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://tile.openstreetmap.org; "
+        "font-src 'self' data: https://unpkg.com; connect-src 'self' https:; upgrade-insecure-requests"
+    )
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
+# Serve both consoles from the API origin so browser sessions stay same-site.
+WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+app.mount("/", StaticFiles(directory=str(WEB_ROOT), html=True), name="web")
