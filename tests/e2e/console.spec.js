@@ -441,3 +441,59 @@ test("administrator can provision and revoke operator accounts from the console"
   await page.getByRole("button", { name: "Update password" }).click();
   await expect(page.locator("#passwordResult")).toContainText(/Password changed/i);
 });
+
+test("operator sees readable route cards from real road-optimization API responses", async ({ page }) => {
+  await page.route("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", route => route.fulfill({ status: 200, contentType: "text/css", body: "" }));
+  await page.route("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js", route => route.fulfill({
+    status: 200,
+    contentType: "application/javascript",
+    body: `window.L = {
+      map: () => ({ setView() { return this; }, fitBounds() {} }),
+      tileLayer: () => ({ addTo() { return this; } }),
+      circleMarker: () => ({ bindPopup() { return this; }, addTo() { return this; }, setStyle() {}, remove() {} }),
+      geoJSON: () => ({ addTo() { return this; }, remove() {} }),
+    };`,
+  }));
+  await page.route("**/api/v1/bins", route => route.fulfill({ json: [{
+    id: "BIN-ROUTE-01", latitude: 28.6, longitude: 77.2, capacity_liters: 100,
+    criticality: 3, source: "live", active: true,
+  }] }));
+  await page.route("**/api/v1/bins/BIN-ROUTE-01/history*", route => route.fulfill({ json: [{
+    fill_percent: 50, measured_at: new Date().toISOString(),
+  }] }));
+  await page.route("**/api/v1/jobs?limit=100", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/vehicles", route => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/routes/optimize", async route => {
+    await route.fulfill({ json: {
+      route_plan_id: "route-plan-e2e",
+      total_distance_meters: 2000,
+      routes: [{
+        vehicle_index: 0, stop_indices: [1], ordered_bin_ids: ["BIN-ROUTE-01"],
+        load_liters: 50, capacity_liters: 100, capacity_utilization: 0.5,
+        distance_meters: 2000, road_duration_seconds: 600, geometry: null,
+      }],
+    } });
+  });
+
+  await page.goto("/");
+  await page.locator("#token").fill("test-only-token");
+  await page.locator("#connect").click();
+  await expect(page.locator("#binCount")).toHaveText("1");
+  await expect(page.locator("#telemetryCount")).toHaveText("1");
+  await expect(page.locator("#jobCount")).toHaveText("0");
+  await expect(page.locator("#availableVehicleCount")).toHaveText("0");
+  await page.getByLabel("Select BIN-ROUTE-01").check();
+  await page.locator("#depotLat").fill("28.61");
+  await page.locator("#depotLon").fill("77.21");
+  await page.locator("#vehicleCapacity").fill("100");
+  await page.locator("#vehicleCount").fill("1");
+  await page.getByRole("button", { name: "Optimize selected bins" }).click();
+
+  await expect(page.locator("#routeResult")).toContainText("1 routes planned");
+  await expect(page.locator("#routeResult")).toContainText("Vehicle 1");
+  await expect(page.locator("#routeResult")).toContainText("BIN-ROUTE-01");
+  await expect(page.locator("#routeResult")).toContainText("50 L planned load");
+  await expect(page.locator("#routeResult")).toContainText("10 min estimated road time");
+  await expect(page.locator("#routeResult")).not.toContainText("solver");
+  await expect(page.locator("#routeResult")).not.toContainText("{");
+});
