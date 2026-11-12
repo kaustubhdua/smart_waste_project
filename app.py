@@ -150,9 +150,8 @@ else:
         """
         <div class="workflow">
           <div class="step">The operations workspace is access-controlled.</div>
-          <div class="trust">Live operational records are available only inside the authenticated
-          operator console. This public product page does not display sample readings, simulated
-          fleet activity or unverified performance figures.</div>
+          <div class="trust">Access live collection workflows and operational records inside the authenticated
+          operator console using your organization's account.</div>
         </div>
         """,
         unsafe_allow_html=True,
