@@ -372,6 +372,8 @@ def readiness(db: Session = Depends(get_db)):
 
 @app.post("/api/v1/bins", response_model=BinOut, dependencies=[Depends(require_operator)], status_code=201)
 def create_bin(payload: BinCreate, db: Session = Depends(get_db)):
+    if settings.app_env.strip().lower() == "production" and payload.source == "demo":
+        raise HTTPException(422, "Demo-source bins are not accepted in production")
     if db.get(Bin, payload.id):
         raise HTTPException(409, "Bin already exists")
     row = Bin(**payload.model_dump())
