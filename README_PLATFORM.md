@@ -1,12 +1,17 @@
-# Smart Waste Collection Platform — Engineering Upgrade
+# Smart Waste Collection Platform
 
-This repository is being evolved from a Streamlit/ML/routing prototype into a backend-backed waste collection platform. The original modules remain available; the new API foundation is under `backend/`.
+WasteOps is evolving from an academic prototype into an API-backed waste collection operations platform.
+
+- The public Streamlit entry page (`app.py`) is a branded product overview. It does not generate sample readings, train models at page load, or show simulated vehicle routes.
+- The authenticated operations console is served from `web/index.html` and uses the FastAPI service for bins, telemetry, jobs, vehicles, dispatch and driver workflows.
+- Set `WASTEOPS_CONSOLE_URL` in the Streamlit deployment to link the public entry page to the deployed operator console. Do not put API credentials in this variable.
+- Operational records are not displayed on the public entry page. Sign-in and role checks remain in the API-backed console.
 
 ## Quick start (Docker)
 
 1. Copy `.env.example` to `.env` and replace both secrets with unique, random values.
 2. Run `docker compose up --build`.
-3. Open `http://localhost:8000/docs` for the interactive API and `http://localhost:8000/health` for the health check.
+3. Open `http://localhost:8000` for the operator console, `http://localhost:8000/driver.html` for the driver view, `http://localhost:8000/docs` for the interactive API and `http://localhost:8000/health` for the health check.
 
 Never commit `.env` or expose bootstrap credentials in a public deployment. Production operator access uses named accounts and expiring, revocable sessions. Enroll individual devices from the administrator console; device credentials are returned once, hashed at rest, and scoped to one bin.
 
@@ -45,7 +50,7 @@ Driver transition requests accept an `Idempotency-Key` header. The database stor
 
 ## Data truthfulness
 
-Every bin has a `source` of `live`, `imported`, or `demo`. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. Routing uses real road-network distance/time data; if the provider fails, the API returns an error rather than fabricating distances. The API serves next-observation forecasts when a trained artifact and suitable telemetry are available; no field-performance claims are made. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.
+Every bin has a `source` of `live`, `imported`, or `demo`. The operator interface only offers live and imported records, excludes demo-source bins from operational views, and the API rejects demo-source bin creation in production. Telemetry ingestion is authenticated and duplicate messages are idempotent by device and message ID. Routing uses real road-network distance/time data; if the provider fails, the API returns an error rather than fabricating distances. The API serves next-observation forecasts when a trained artifact and suitable telemetry are available; no field-performance claims are made. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for remaining release blockers.
 
 ## Production configuration guardrails
 

@@ -1,108 +1,164 @@
+"""WasteOps public product experience.
+
+The legacy Streamlit CSV dashboard has been retired. Live operational work belongs
+in the authenticated API-backed operator console (web/index.html). This page is
+a branded product entry point and intentionally never fabricates operational data.
+"""
 import os
-import folium
-import joblib
-import pandas as pd
+
 import streamlit as st
-from streamlit_folium import folium_static
 
-from person1_preprocessing import preprocess_data, generate_synthetic_bin_data
-from person2_ml_prediction import train_ml_model, load_ml_model, predict_next_fill
-from person3_fuzzy_logic import calculate_priority, create_fuzzy_system
-from person4_optimization import solve_vrp
-
-st.set_page_config(page_title="Smart Waste Collection Dashboard", page_icon="🗑️", layout="wide")
-st.title("🗑️ Smart Waste Collection & Route Optimization System")
-st.markdown("AI-assisted waste monitoring, priority scoring, and collection planning")
-
-@st.cache_resource
-def load_resources():
-    return create_fuzzy_system(), load_ml_model()
-
-fuzzy_sim, ml_model = load_resources()
-csv_path = "cleaned_waste_data.csv"
-if not os.path.exists(csv_path):
-    st.info("Creating a clearly labeled synthetic demo dataset for first-time setup.")
-    preprocess_data(generate_synthetic_bin_data()).to_csv(csv_path, index=False)
-
-df = pd.read_csv(csv_path)
-df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-df = df.dropna(subset=["timestamp"]).sort_values(["bin_id", "timestamp"])
-latest_df = df.groupby("bin_id", sort=False).tail(1).copy().reset_index(drop=True)
-
-if ml_model is None:
-    st.warning("No trained model artifact found. Predictions are disabled until you train a model.")
-    if st.button("Train model on current dataset"):
-        with st.spinner("Training and evaluating the model on a chronological holdout..."):
-            train_ml_model(csv_path)
-        load_resources.clear()
-        st.success("Model artifact created. Reloading dashboard.")
-        st.rerun()
-else:
-    try:
-        latest_df["predicted_fill_pct"] = predict_next_fill(ml_model, latest_df).round(1)
-    except (ValueError, KeyError) as exc:
-        latest_df["predicted_fill_pct"] = latest_df["fill_level_pct"]
-        st.error(f"Model prediction unavailable for current rows: {exc}")
-    else:
-        st.caption("Predicted fill is a one-observation-ahead estimate; it is not a calibrated 6/12-hour forecast.")
-
-# The CSV does not contain verified collection events, so do not fabricate elapsed
-# service time. Time contribution is zero until service history is available.
-latest_df["priority_score"] = latest_df.apply(
-    lambda row: calculate_priority(row["predicted_fill_pct"] if "predicted_fill_pct" in latest_df else row["fill_level_pct"], 0, row["criticality"], fuzzy_sim),
-    axis=1,
+st.set_page_config(
+    page_title="WasteOps | Smart Collection Operations",
+    page_icon="♻️",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
-st.info("Dataset mode: synthetic/imported CSV. Service history is not present in this dataset, so elapsed-since-empty contribution is disabled.")
 
-st.sidebar.header("Collection Controls")
-min_priority = st.sidebar.slider("Minimum Priority Score for Pickup", 0, 100, 50)
-num_trucks = st.sidebar.number_input("Number of Collection Trucks", min_value=1, max_value=5, value=2)
-truck_capacity = st.sidebar.slider("Truck Capacity (Liters)", 500, 3000, 1000)
+CONSOLE_URL = os.getenv("WASTEOPS_CONSOLE_URL", "").strip()
 
-pickup_df = latest_df[latest_df["priority_score"] >= min_priority].copy()
-pickup_df["waste_volume"] = (pickup_df["capacity_liters"] * pickup_df["fill_level_pct"] / 100).round().astype(int)
-pickup_bins = pickup_df.to_dict("records")
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
+    :root { color-scheme: dark; }
+    .stApp {
+      background:
+        radial-gradient(ellipse at 8% 0%, rgba(38,112,91,.24), transparent 34%),
+        radial-gradient(ellipse at 92% 12%, rgba(58,105,137,.18), transparent 30%),
+        #081411;
+      color: #edf7f1;
+      font-family: 'DM Sans', sans-serif;
+    }
+    [data-testid="stHeader"] { background: rgba(8,20,17,.72); }
+    [data-testid="stToolbar"], #MainMenu, footer { visibility: hidden; }
+    .block-container { max-width: 1180px; padding-top: 2.1rem; padding-bottom: 4rem; }
+    .brandbar { display:flex; align-items:center; justify-content:space-between; gap:16px;
+      padding: 8px 0 26px; border-bottom:1px solid rgba(194,225,207,.13); }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .brandmark { width:44px; height:44px; display:grid; place-items:center; border-radius:14px;
+      color:#071b13; font-size:24px; background:linear-gradient(145deg,#a8e6c1,#58c89a);
+      box-shadow:0 8px 28px rgba(73,196,141,.16); }
+    .brandname { color:#f2fbf5; font:800 20px 'Manrope',sans-serif; letter-spacing:-.7px; }
+    .brandmeta { color:#8ca99a; font-size:11px; letter-spacing:2px; text-transform:uppercase; }
+    .topnote { color:#a5c3b2; font-size:12px; border:1px solid rgba(153,205,174,.22);
+      border-radius:999px; padding:8px 12px; background:rgba(20,55,41,.42); }
+    .hero { padding: clamp(42px,8vw,92px) 0 42px; max-width:900px; }
+    .eyebrow { color:#8fe0b2; text-transform:uppercase; letter-spacing:2.6px; font-size:11px;
+      font-weight:700; margin-bottom:18px; }
+    .hero h1 { color:#f3faf5; font:800 clamp(42px,7vw,76px)/1.04 'Manrope',sans-serif;
+      letter-spacing:-3.5px; margin:0 0 22px; }
+    .hero p { color:#a9c2b4; font-size:clamp(16px,2vw,19px); line-height:1.75;
+      max-width:720px; margin:0; }
+    .hero-accent { color:#91e0b3; }
+    .section-label { color:#8fe0b2; text-transform:uppercase; letter-spacing:2px;
+      font-size:11px; font-weight:700; margin:28px 0 14px; }
+    .feature { height:100%; min-height:190px; border:1px solid rgba(169,210,185,.15);
+      border-radius:18px; padding:22px; background:linear-gradient(145deg,rgba(22,48,37,.86),rgba(13,31,25,.86));
+      box-shadow:0 18px 45px rgba(0,0,0,.12); }
+    .feature-icon { font-size:23px; margin-bottom:18px; }
+    .feature h3 { color:#f0faf3; font:700 17px 'Manrope',sans-serif; margin:0 0 8px; }
+    .feature p { color:#9db7a7; font-size:13px; line-height:1.65; margin:0; }
+    .workflow { border:1px solid rgba(169,210,185,.15); background:rgba(13,31,25,.72);
+      border-radius:18px; padding:22px 24px; margin-top:22px; }
+    .step { color:#e8f5ec; font-weight:700; font-size:14px; }
+    .step small { display:block; color:#91aa9b; font-weight:400; font-size:12px; margin-top:4px; }
+    .stepnum { color:#8fe0b2; font:800 12px 'Manrope',sans-serif; letter-spacing:1px; }
+    .trust { color:#87a393; font-size:12px; line-height:1.7; margin-top:24px; }
+    .footerline { border-top:1px solid rgba(194,225,207,.13); margin-top:54px; padding-top:18px;
+      color:#718d7e; font-size:11px; display:flex; justify-content:space-between; gap:12px; }
+    div.stButton > button, div.stLinkButton > a {
+      border:0; border-radius:11px; background:#8fe0b2; color:#082016; font-weight:800;
+      padding: .72rem 1.2rem; min-height:46px; box-shadow:0 10px 28px rgba(85,194,137,.14);
+    }
+    div.stButton > button:hover, div.stLinkButton > a:hover { background:#b0edc9; color:#082016; }
+    a { color:#9ce7bc !important; }
+    @media(max-width:650px) {
+      .brandbar { align-items:flex-start; flex-direction:column; }
+      .hero h1 { letter-spacing:-2px; }
+      .footerline { flex-direction:column; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Bins Monitored", len(latest_df))
-col2.metric("Bins Requiring Pickup", len(pickup_bins))
-col3.metric("Average Fill", f"{latest_df['fill_level_pct'].mean():.1f}%")
-col4.metric("High Priority Bins", len(latest_df[latest_df["priority_score"] > 70]))
-st.divider()
-col_left, col_right = st.columns([2, 1])
-with col_left:
-    st.subheader("Bin Locations & Priority Map")
-    depot_lat, depot_lon = 28.5355, 77.3910
-    map_view = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
-    folium.Marker([depot_lat, depot_lon], popup="Demo depot", icon=folium.Icon(color="black", icon="home")).add_to(map_view)
-    for _, row in latest_df.iterrows():
-        score = row["priority_score"]
-        color = "red" if score >= 70 else "orange" if score >= 40 else "green"
-        fill_display = row.get("predicted_fill_pct", row["fill_level_pct"])
-        folium.CircleMarker(
-            [row["latitude"], row["longitude"]], radius=8, color=color, fill=True,
-            fill_color=color, fill_opacity=0.7,
-            popup=f"Bin: {row['bin_id']} | Observed: {row['fill_level_pct']}% | Next observation estimate: {fill_display}% | Priority: {score}",
-        ).add_to(map_view)
-    folium_static(map_view, width=700, height=450)
+st.markdown(
+    """
+    <div class="brandbar">
+      <div class="brand">
+        <div class="brandmark">♻</div>
+        <div><div class="brandname">WasteOps</div><div class="brandmeta">Collection intelligence</div></div>
+      </div>
+      <div class="topnote">Smarter routes · Cleaner communities</div>
+    </div>
+    <section class="hero">
+      <div class="eyebrow">A better way to manage urban waste</div>
+      <h1>Cleaner streets start with <span class="hero-accent">smarter collection.</span></h1>
+      <p>One connected workspace for waste monitoring, collection planning and field operations.
+      Turn verified bin activity into clear priorities, efficient routes and accountable service.</p>
+    </section>
+    <div class="section-label">One connected operations workflow</div>
+    """,
+    unsafe_allow_html=True,
+)
 
-with col_right:
-    st.subheader("Demo route planning")
-    st.warning("This legacy Streamlit route solver still uses approximate coordinate costs. Use the backend API /api/v1/routes/optimize for road-network optimization.")
-    if st.button("Generate demo routes", type="primary"):
-        if not pickup_bins:
-            st.info("No bins meet the selected priority threshold.")
-        else:
-            routes = solve_vrp(pickup_bins, num_vehicles=num_trucks, vehicle_capacity=truck_capacity)
-            for vehicle, details in routes.items():
-                names = [pickup_bins[i]["bin_id"] for i in details["route_bin_indices"]]
-                st.markdown(f"### {vehicle}")
-                st.write(f"Route: {' → '.join(['Depot'] + names + ['Depot'])}")
-                st.write(f"Estimated demand: {details['total_load']} L")
-                st.progress(min(details["total_load"] / truck_capacity, 1.0))
+features = [
+    ("◉", "Monitor collection points", "Bring registered bins and incoming sensor readings into one operational view. Review recent activity and spot service needs."),
+    ("⌁", "Prioritise with context", "Combine observed fill levels, bin criticality and service history to help teams decide what needs attention first."),
+    ("↗", "Plan practical routes", "Build vehicle-capacity-aware collection plans using road-network travel costs and route geometry."),
+    ("✓", "Close the service loop", "Assign work to drivers, record collection outcomes and keep a traceable history of field actions."),
+]
+cols = st.columns(4, gap="medium")
+for col, (symbol, title, description) in zip(cols, features):
+    with col:
+        st.markdown(
+            f'<div class="feature"><div class="feature-icon">{symbol}</div>'
+            f'<h3>{title}</h3><p>{description}</p></div>',
+            unsafe_allow_html=True,
+        )
 
-with st.expander("Detailed bin status"):
-    columns = ["bin_id", "fill_level_pct", "criticality", "priority_score", "capacity_liters"]
-    if "predicted_fill_pct" in latest_df:
-        columns.insert(2, "predicted_fill_pct")
-    st.dataframe(latest_df[columns].sort_values("priority_score", ascending=False), use_container_width=True)
+st.markdown(
+    """
+    <div class="workflow">
+      <div class="section-label" style="margin-top:0">From observation to verified collection</div>
+    """,
+    unsafe_allow_html=True,
+)
+steps = [
+    ("01", "Observe", "Receive and review bin telemetry"),
+    ("02", "Prioritise", "Identify service needs"),
+    ("03", "Optimise", "Allocate work across vehicles"),
+    ("04", "Collect", "Record driver actions and outcomes"),
+]
+step_cols = st.columns(4, gap="medium")
+for col, (number, title, detail) in zip(step_cols, steps):
+    with col:
+        st.markdown(
+            f'<div class="stepnum">{number}</div><div class="step">{title}<small>{detail}</small></div>',
+            unsafe_allow_html=True,
+        )
+st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown('<div class="section-label">Access the platform</div>', unsafe_allow_html=True)
+if CONSOLE_URL:
+    st.link_button("Open WasteOps operator console ↗", CONSOLE_URL, use_container_width=False)
+else:
+    st.markdown(
+        """
+        <div class="workflow">
+          <div class="step">Your collection operations, in one workspace.</div>
+          <div class="trust">Sign in with your organization's WasteOps account to manage collection points,
+          coordinate assignments and keep field teams aligned.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+st.markdown(
+    """
+    <div class="trust">One workspace for collection monitoring, route planning and accountable field execution.</div>
+    <div class="footerline"><span>WASTEOPS · SMART COLLECTION OPERATIONS</span><span>Built for accountable, data-informed services</span></div>
+    """,
+    unsafe_allow_html=True,
+)

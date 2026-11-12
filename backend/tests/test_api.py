@@ -29,6 +29,27 @@ def test_health_is_public():
 def test_operator_token_required():
     assert client.get("/api/v1/bins").status_code == 401
 
+def test_production_rejects_demo_source_bins(monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module.settings, "app_env", "production")
+    monkeypatch.setitem(
+        main_module.app.dependency_overrides,
+        main_module.get_current_operator,
+        lambda: {"id": "production-test-admin", "username": "production-test", "role": "admin"},
+    )
+    payload = {
+        "id": "production-demo-bin",
+        "latitude": 28.6,
+        "longitude": 77.2,
+        "capacity_liters": 1000,
+        "criticality": 2,
+        "source": "demo",
+    }
+    response = client.post("/api/v1/bins", json=payload)
+    assert response.status_code == 422
+    assert "not accepted in production" in response.json()["detail"]
+
 def test_bin_and_idempotent_telemetry():
     b = {"id":"bin-test","latitude":28.6,"longitude":77.2,"capacity_liters":1000,"criticality":2,"source":"demo"}
     assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
