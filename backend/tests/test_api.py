@@ -678,3 +678,20 @@ def test_production_readiness_rejects_a_stale_schema_revision(monkeypatch):
         with SessionLocal() as db:
             db.execute(text("DROP TABLE IF EXISTS alembic_version"))
             db.commit()
+
+
+def test_operator_and_driver_consoles_are_served_from_api_origin():
+    operator = client.get("/")
+    driver = client.get("/driver.html")
+    assert operator.status_code == 200
+    assert "WasteOps" in operator.text
+    assert driver.status_code == 200
+    assert "Driver sign-in" in driver.text
+    assert operator.headers["x-content-type-options"] == "nosniff"
+    assert operator.headers["x-frame-options"] == "DENY"
+    assert "default-src 'self'" in operator.headers["content-security-policy"]
+
+
+def test_api_responses_are_not_cacheable():
+    response = client.get("/health")
+    assert response.headers["cache-control"] == "no-store, private"
