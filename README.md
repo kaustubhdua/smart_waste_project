@@ -14,7 +14,7 @@ A polished, interactive waste-collection operations workspace built with Streaml
 
 </div>
 
-WasteOps provides an end-to-end interactive product experience without requiring a separate API server, database, cloud credentials, IoT hardware or paid routing service. The workspace initializes a realistic local operating scenario and keeps edits, jobs, vehicles and route plans in the active Streamlit session. It is suitable for product walkthroughs, interface evaluation and demonstrating the collection workflow. It is not a live municipal monitoring service.
+WasteOps provides an end-to-end interactive product experience without requiring a separate API server, database, cloud credentials, IoT hardware or paid routing service. The workspace opens with a ready-to-use service-area scenario. Collection points, jobs, vehicles and route plans are interactive and editable. Changes remain in the active browser session; use **Save workspace** to export a JSON snapshot and **Restore workspace** to continue from a saved snapshot. This standalone edition does not connect to municipal infrastructure or physical sensors.
 
 ## Product modules
 
@@ -24,7 +24,7 @@ WasteOps provides an end-to-end interactive product experience without requiring
 - **Collection management:** create and filter jobs, assign/update statuses, complete service and automatically reset collection-point fill.
 - **Fleet management:** vehicle and driver roster, capacity/fuel indicators, availability controls and vehicle registration.
 - **Performance analytics:** fill distribution, service mix, activity trends and CSV exports.
-- **Session workspace:** all interactive changes are held in Streamlit session state; reset is available from the sidebar.
+- **Workspace continuity:** export and restore the complete workspace as JSON, or reset it from the sidebar.
 
 ## Run locally
 
@@ -56,7 +56,7 @@ The app can be deployed directly to Streamlit Community Cloud:
 3. Set the app entry point to `app.py`.
 4. Deploy.
 
-No environment secrets or backend services are required. The map uses public Carto basemap tiles and the Python dependencies are declared in `requirements.txt`.
+No environment secrets or backend services are required. The map uses public OpenStreetMap tiles and the Python dependencies are declared in `requirements.txt`.
 
 ## Route planning
 
@@ -83,4 +83,4 @@ python -m unittest discover -s tests -v
 python -m compileall -q app.py person1_preprocessing.py person2_ml_prediction.py person3_fuzzy_logic.py person4_optimization.py
 ```
 
-The route planner's coordinate-based distance estimate is for planning demonstrations and should not be interpreted as verified road-network distance or a field-validated dispatch ETA.
+Route distance is estimated from geographic coordinates; it is not a road-network distance or a field-validated dispatch ETA. Workspace values are editable planning inputs, not a live sensor feed.
