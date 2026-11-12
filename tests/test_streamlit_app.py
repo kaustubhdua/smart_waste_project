@@ -19,14 +19,12 @@ class WasteOpsStreamlitTests(unittest.TestCase):
             "Fleet",
             "Analytics",
         ):
-            app.session_state["active_page"] = page
-            app.run()
+            app.radio[0].set_value(page).run()
             self.assertFalse(app.exception, f"{page}: {app.exception}")
 
     def test_route_planner_builds_capacity_safe_vehicle_routes(self):
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
-        app.session_state["active_page"] = "Route planner"
-        app.run()
+        app.radio[0].set_value("Route planner").run()
         self.assertFalse(app.exception, str(app.exception))
 
         optimize = next(
