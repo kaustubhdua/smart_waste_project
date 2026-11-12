@@ -16,8 +16,6 @@ st.set_page_config(
 )
 
 CONSOLE_URL = os.getenv("WASTEOPS_CONSOLE_URL", "").strip()
-DOCS_URL = "https://github.com/kaustubhdua/smart_waste_project/blob/main/README_PLATFORM.md"
-REPO_URL = "https://github.com/kaustubhdua/smart_waste_project"
 
 st.markdown(
     """
@@ -149,25 +147,17 @@ else:
     st.markdown(
         """
         <div class="workflow">
-          <div class="step">The operations workspace is access-controlled.</div>
-          <div class="trust">Access live collection workflows and operational records inside the authenticated
-          operator console using your organization's account.</div>
+          <div class="step">Your collection operations, in one workspace.</div>
+          <div class="trust">Sign in with your organization's WasteOps account to manage collection points,
+          coordinate assignments and keep field teams aligned.</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-left, right = st.columns([1, 1])
-with left:
-    st.link_button("Platform documentation ↗", DOCS_URL, use_container_width=True)
-with right:
-    st.link_button("Explore the source on GitHub ↗", REPO_URL, use_container_width=True)
-
 st.markdown(
     """
-    <div class="trust">WasteOps is designed around source-aware telemetry, authenticated operations,
-    capacity-constrained planning and verifiable collection events. Operational availability depends
-    on the deployment's configured services and connected field devices.</div>
+    <div class="trust">One workspace for collection monitoring, route planning and accountable field execution.</div>
     <div class="footerline"><span>WASTEOPS · SMART COLLECTION OPERATIONS</span><span>Built for accountable, data-informed services</span></div>
     """,
     unsafe_allow_html=True,
