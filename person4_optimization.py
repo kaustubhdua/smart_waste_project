@@ -61,7 +61,7 @@ def solve_vrp(bins_data, num_vehicles=2, vehicle_capacity=1000):
         demand = bin_record.get("waste_volume", 50)
         if not isinstance(demand, (int, float)) or isinstance(demand, bool) or not np.isfinite(demand) or demand < 0:
             raise ValueError(f"bin record {index} has invalid waste_volume")
-        if demand > vehicle_capacity:
+        if demand > max(vehicle_capacities):
             raise ValueError(f"bin record {index} exceeds vehicle capacity")
 
     # Depot is assumed at index 0 (city center/waste hub)
