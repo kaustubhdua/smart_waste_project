@@ -21,6 +21,25 @@ def test_production_configuration_accepts_explicit_safe_settings():
     validate_production_settings(production_settings())
 
 
+def test_production_configuration_accepts_authenticated_ors():
+    validate_production_settings(production_settings(
+        routing_provider="ors",
+        ors_base_url="https://api.heigit.org/openrouteservice/v2",
+        ors_api_key="test-managed-key",
+    ))
+
+
+@pytest.mark.parametrize("override", [
+    {"routing_provider": "ors"},
+    {"routing_provider": "ors", "ors_api_key": "key"},
+    {"routing_provider": "ors", "ors_base_url": "https://api.openrouteservice.org/v2", "ors_api_key": "key"},
+    {"routing_provider": "unknown"},
+])
+def test_production_configuration_rejects_untrusted_ors_settings(override):
+    with pytest.raises(RuntimeError, match="Unsafe production configuration"):
+        validate_production_settings(production_settings(**override))
+
+
 @pytest.mark.parametrize(
     "override",
     [
