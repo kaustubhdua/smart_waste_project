@@ -42,3 +42,5 @@ jobs:
           done
           cat /tmp/wasteops-streamlit.log
           exit 1
+      - name: Execute the Streamlit page in AppTest
+        run: python -c "from streamlit.testing.v1 import AppTest; app = AppTest.from_file('app.py', default_timeout=45).run(); assert not app.exception, str(app.exception)"
