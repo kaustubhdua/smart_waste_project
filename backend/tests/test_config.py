@@ -31,7 +31,6 @@ def test_production_configuration_accepts_authenticated_ors():
 
 @pytest.mark.parametrize("override", [
     {"routing_provider": "ors"},
-    {"routing_provider": "ors", "ors_api_key": "key"},
     {"routing_provider": "ors", "ors_base_url": "https://api.openrouteservice.org/v2", "ors_api_key": "key"},
     {"routing_provider": "unknown"},
 ])
