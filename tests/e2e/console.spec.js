@@ -101,15 +101,20 @@ test("bin registration requires explicit measured data and provenance", async ({
 });
 
 
-test("operator console labels data provenance and avoids implying live telemetry", async ({ page }) => {
+test("operator console keeps demo artifacts and model setup out of the product UI", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("API records · source-labelled")).toBeVisible();
-  await expect(page.getByText("Live API data")).toHaveCount(0);
+  await expect(page.getByText("API records · source-labelled")).toHaveCount(0);
+  await expect(page.getByText(/synthetic|demo data|sample data/i)).toHaveCount(0);
+  await expect(page.getByText(/ML next-observation forecast/i)).toHaveCount(0);
+  await expect(page.locator("#source option")).toHaveCount(3);
+  await expect(page.locator("#source option[value=live]")).toHaveCount(1);
+  await expect(page.locator("#source option[value=imported]")).toHaveCount(1);
+  await expect(page.locator("#source option[value=demo]")).toHaveCount(0);
   for (const id of ["capacity", "lat", "lon", "criticality", "source", "vehicleCap", "vehicleLat", "vehicleLon", "depotLat", "depotLon", "vehicleCapacity", "vehicleCount"]) {
     await expect(page.locator("#" + id)).toHaveValue("");
   }
-  await expect(page.getByText(/the console does not invent telemetry/i)).toBeVisible();
 });
+
 
 test("operator console treats API-controlled labels as text, not executable markup", async ({ page }) => {
   const hostileId = '<img src=x onerror=alert(1)>BIN-XSS';
