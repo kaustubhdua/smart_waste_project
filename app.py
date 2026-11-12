@@ -215,7 +215,7 @@ def make_route_plan():
     vehicle_rows = [v for v in vehicles if v["available"]]
     if not vehicle_rows:
         return False, "No available vehicles. Release a vehicle before planning routes."
-    capacity = max(v["capacity_l"] for v in vehicle_rows)
+    capacity = min(v["capacity_l"] for v in vehicle_rows)
     demands = [max(1, int(round(b["capacity_l"] * b["fill_pct"] / 100))) for b in candidates]
     if max(demands) > capacity:
         return False, "A collection point exceeds the capacity of the available fleet."
@@ -390,23 +390,22 @@ elif selected == "Route planner":
         active_vehicle_count=st.slider("Vehicles to deploy",1,max(1,len([v for v in vehicles if v["available"]])),min(3,max(1,len([v for v in vehicles if v["available"]]))))
         capacity_override=st.selectbox("Vehicle capacity",["Use fleet capacity","600 L","900 L","1,200 L","1,500 L"])
         if st.button("✦  Optimize collection routes",use_container_width=True):
-            for row in bins:
-                if row["fill_pct"]<threshold: row["_skip"]=True
-                else: row.pop("_skip",None)
             candidates=[b for b in bins if b["fill_pct"]>=threshold]
             available=[v for v in vehicles if v["available"]][:active_vehicle_count]
+            original_capacities=[v["capacity_l"] for v in available]
             if capacity_override!="Use fleet capacity":
                 cap=int(capacity_override.replace(" L","").replace(",",""))
-                for v in available:v["capacity_l"]=cap
+                for v in available:v["capacity_l"]=min(cap,v["capacity_l"])
             if not candidates: st.info("No collection points currently meet this threshold.")
             elif not available: st.error("No vehicles are available.")
-            elif max(b["capacity_l"]*b["fill_pct"]/100 for b in candidates)>max(v["capacity_l"] for v in available): st.error("A collection point exceeds available vehicle capacity. Adjust the threshold or fleet.")
+            elif max(b["capacity_l"]*b["fill_pct"]/100 for b in candidates)>min(v["capacity_l"] for v in available): st.error("A collection point exceeds available vehicle capacity. Adjust the threshold or fleet.")
             else:
                 old=[b["fill_pct"] for b in bins]
                 for b in bins:
                     if b["fill_pct"]<threshold:b["fill_pct"]=0
                 ok,message=make_route_plan()
                 for b,value in zip(bins,old):b["fill_pct"]=value
+                for v,capacity in zip(available,original_capacities):v["capacity_l"]=capacity
                 if ok:
                     log_event("Collection routes optimized · "+str(len(data["routes"]))+" vehicles assigned")
                     st.success(message)
