@@ -10,7 +10,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite:///./smart_waste.db"
     api_token: str = "change-me-before-deployment"
+    routing_provider: str = "osrm"
     osrm_base_url: str = "https://router.project-osrm.org"
+    ors_base_url: str = "https://api.heigit.org/openrouteservice/v2"
+    ors_api_key: str = ""
     cors_origins: str = "http://localhost:8080,http://127.0.0.1:8080"
     auto_create_schema: bool = True
     seed_demo_data: bool = False
@@ -46,25 +49,45 @@ def validate_production_settings(config: Settings) -> None:
     if config.seed_demo_data:
         errors.append("SEED_DEMO_DATA must be false in production")
 
-    routing_url = urlparse(config.osrm_base_url.strip())
-    try:
-        routing_port = routing_url.port
-    except ValueError:
-        routing_port = -1
-    if (
-        routing_url.scheme != "https"
-        or not routing_url.hostname
-        or routing_port == -1
-        or routing_url.username is not None
-        or routing_url.password is not None
-        or routing_url.query
-        or routing_url.fragment
-        or any(character.isspace() for character in routing_url.netloc)
-        or routing_url.hostname.lower() in {"router.project-osrm.org", "routing.openstreetmap.de"}
-    ):
-        errors.append(
-            "OSRM_BASE_URL must be a trusted HTTPS routing provider; public demo routers are not production services"
-        )
+    provider = config.routing_provider.strip().lower()
+    if provider == "osrm":
+        routing_url = urlparse(config.osrm_base_url.strip())
+        try:
+            routing_port = routing_url.port
+        except ValueError:
+            routing_port = -1
+        if (
+            routing_url.scheme != "https"
+            or not routing_url.hostname
+            or routing_port == -1
+            or routing_url.username is not None
+            or routing_url.password is not None
+            or routing_url.query
+            or routing_url.fragment
+            or any(character.isspace() for character in routing_url.netloc)
+            or routing_url.hostname.lower() in {"router.project-osrm.org", "routing.openstreetmap.de"}
+        ):
+            errors.append("OSRM_BASE_URL must be a trusted HTTPS OSRM-compatible provider")
+    elif provider == "ors":
+        routing_url = urlparse(config.ors_base_url.strip())
+        try:
+            routing_port = routing_url.port
+        except ValueError:
+            routing_port = -1
+        if (
+            routing_url.scheme != "https"
+            or routing_url.hostname != "api.heigit.org"
+            or routing_url.path.rstrip("/") != "/openrouteservice/v2"
+            or routing_port == -1
+            or routing_url.username is not None
+            or routing_url.password is not None
+            or routing_url.query
+            or routing_url.fragment
+            or not config.ors_api_key.strip()
+        ):
+            errors.append("ORS requires the official HTTPS HeiGIT endpoint and a managed ORS_API_KEY")
+    else:
+        errors.append("ROUTING_PROVIDER must be osrm or ors")
 
     origins = [origin.strip() for origin in config.cors_origins.split(",") if origin.strip()]
     if not origins or "*" in origins:
