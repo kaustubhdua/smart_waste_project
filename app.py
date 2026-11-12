@@ -188,7 +188,7 @@ def refresh_bin_status(row: dict):
 
 def build_map(selected_ids=None, route_lines=None, height=480):
     selected_ids = set(selected_ids or [])
-    m = folium.Map(location=DEPOT, zoom_start=12, tiles="CartoDB dark_matter", control_scale=True)
+    m = folium.Map(location=DEPOT, zoom_start=12, tiles="OpenStreetMap", control_scale=True)
     folium.Marker(DEPOT, tooltip="WasteOps depot", icon=folium.Icon(color="green", icon="home")).add_to(m)
     for row in bins:
         color = "#f05b5b" if row["fill_pct"] >= 80 else ("#f2bd55" if row["fill_pct"] >= 65 else "#55c98b")
