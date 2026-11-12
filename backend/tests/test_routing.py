@@ -143,3 +143,56 @@ def test_road_route_rejects_boolean_geometry_coordinates(monkeypatch):
     monkeypatch.setattr(routing, "_get", fake_get)
     with pytest.raises(RoutingError, match="invalid route coordinates"):
         run(routing.road_route(COORDINATES))
+
+
+def test_ors_matrix_uses_validated_distance_and_duration_data(monkeypatch):
+    monkeypatch.setattr(routing.settings, "routing_provider", "ors")
+    monkeypatch.setattr(routing.settings, "ors_api_key", "test-key")
+
+    async def fake_post(path, body):
+        assert path == "matrix/driving-car"
+        assert body == {
+            "locations": [[77.2, 28.6], [77.21, 28.61]],
+            "metrics": ["distance", "duration"],
+            "units": "m",
+        }
+        return {"distances": [[0, 120.5], [120.5, 0]], "durations": [[0, 35], [35, 0]]}
+
+    monkeypatch.setattr(routing, "_ors_post", fake_post)
+    result = run(routing.road_matrix(COORDINATES))
+    assert result["distances_meters"] == [[0, 120.5], [120.5, 0]]
+    assert result["durations_seconds"] == [[0, 35], [35, 0]]
+
+
+def test_ors_route_returns_validated_geojson(monkeypatch):
+    monkeypatch.setattr(routing.settings, "routing_provider", "ors")
+    monkeypatch.setattr(routing.settings, "ors_api_key", "test-key")
+    geometry = {"type": "LineString", "coordinates": [[77.2, 28.6], [77.21, 28.61]]}
+
+    async def fake_post(path, body):
+        assert path == "directions/driving-car/geojson"
+        assert body["coordinates"] == [[77.2, 28.6], [77.21, 28.61]]
+        return {"features": [{
+            "type": "Feature",
+            "properties": {"summary": {"distance": 120.5, "duration": 35}},
+            "geometry": geometry,
+        }]}
+
+    monkeypatch.setattr(routing, "_ors_post", fake_post)
+    result = run(routing.road_route(COORDINATES))
+    assert result == {"distance_meters": 120.5, "duration_seconds": 35, "geometry": geometry}
+
+
+def test_ors_route_rejects_invalid_provider_geometry(monkeypatch):
+    monkeypatch.setattr(routing.settings, "routing_provider", "ors")
+    monkeypatch.setattr(routing.settings, "ors_api_key", "test-key")
+
+    async def fake_post(path, body):
+        return {"features": [{
+            "properties": {"summary": {"distance": 120.5, "duration": 35}},
+            "geometry": {"type": "LineString", "coordinates": [[181, 28.6], [77.21, 28.61]]},
+        }]}
+
+    monkeypatch.setattr(routing, "_ors_post", fake_post)
+    with pytest.raises(RoutingError, match="invalid route coordinates"):
+        run(routing.road_route(COORDINATES))
