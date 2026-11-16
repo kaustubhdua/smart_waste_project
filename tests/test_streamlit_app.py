@@ -47,13 +47,16 @@ class WasteOpsStreamlitTests(unittest.TestCase):
         self.assertEqual(workspace["events"], [])
         self.assertTrue(all(row["collected"] == 0 and row["requests"] == 0 for row in workspace["history"]))
         self.assertFalse(any(job["status"] == "Completed" for job in workspace["jobs"]))
-        for job in workspace["jobs"]:
-            vehicle = next(row for row in workspace["vehicles"] if row["id"] == job["vehicle"])
-            self.assertFalse(vehicle["available"])
-            self.assertIn(job["bin_id"], workspace["routes"][vehicle["id"]]["bins"])
+        self.assertTrue(all(job["status"] == "Detected" and job["vehicle"] == "Unassigned" for job in workspace["jobs"]))
+        self.assertTrue(all(vehicle["available"] for vehicle in workspace["vehicles"]))
+        self.assertEqual(workspace["routes"], {})
 
     def test_active_vehicle_cannot_be_released(self):
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
+        workspace = app.session_state["wasteops"]
+        workspace["jobs"][0]["status"] = "Assigned"
+        workspace["jobs"][0]["vehicle"] = "TRK-01"
+        next(vehicle for vehicle in workspace["vehicles"] if vehicle["id"] == "TRK-01")["available"] = False
         app.radio[0].set_value("Fleet").run()
         self.assertFalse(app.exception, str(app.exception))
         release = next(button for button in app.button if button.label == "Release")
