@@ -286,7 +286,7 @@ with st.sidebar:
     if st.button("↻  Reset workspace", width="stretch", type="secondary"):
         st.session_state.wasteops = make_workspace()
         st.rerun()
-    st.caption("WasteOps · Collection operations")
+    st.caption("WasteOps · Training workspace")
 
 
 # ---------------------------------------------------------------------------
