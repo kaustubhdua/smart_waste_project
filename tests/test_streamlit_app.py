@@ -39,6 +39,26 @@ class WasteOpsStreamlitTests(unittest.TestCase):
         for route in workspace["routes"].values():
             self.assertLessEqual(route["load_l"], route["capacity_l"])
 
+
+    def test_workspace_starts_with_consistent_fleet_and_no_fake_history(self):
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
+        self.assertFalse(app.exception, str(app.exception))
+        workspace = app.session_state["wasteops"]
+        self.assertEqual(workspace["events"], [])
+        self.assertTrue(all(row["collected"] == 0 and row["requests"] == 0 for row in workspace["history"]))
+        self.assertFalse(any(job["status"] == "Completed" for job in workspace["jobs"]))
+        for job in workspace["jobs"]:
+            vehicle = next(row for row in workspace["vehicles"] if row["id"] == job["vehicle"])
+            self.assertFalse(vehicle["available"])
+            self.assertIn(job["bin_id"], workspace["routes"][vehicle["id"]]["bins"])
+
+    def test_active_vehicle_cannot_be_released(self):
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
+        app.radio[0].set_value("Fleet").run()
+        self.assertFalse(app.exception, str(app.exception))
+        release = next(button for button in app.button if button.label == "Release")
+        self.assertTrue(release.disabled)
+
     def test_training_cycle_advances_telemetry_and_opens_jobs(self):
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
         self.assertFalse(app.exception, str(app.exception))
