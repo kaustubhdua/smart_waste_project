@@ -44,7 +44,16 @@ The training seed is idempotent and preloads 16 collection points, four vehicles
 docker compose logs api
 ```
 
-Use the one-time administrator bootstrap flow in the operator console, then sign in and exercise approval, dispatch, driver actions, completion and verification. The console shows a compact **Training workspace** indicator; it does not repeat demo-source labels on every operational row. This environment indicator is deliberate because generated training records must not be mistaken for readings from physical devices.
+Create the initial administrator once through the API bootstrap endpoint (the operator console is the sign-in interface):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/bootstrap \
+  -H 'Content-Type: application/json' \
+  -H 'X-Bootstrap-Token: YOUR_API_TOKEN' \
+  -d '{"username":"admin","password":"Use-a-unique-password-12+"}'
+```
+
+Use the `API_TOKEN` from `.env` for the bootstrap header and a password of at least 12 characters. Then sign in at the operator console and exercise approval, dispatch, driver actions, completion and verification. The console shows a compact **Training workspace** indicator; it does not repeat demo-source labels on every operational row. This environment indicator is deliberate because generated training records must not be mistaken for readings from physical devices.
 
 For an empty environment, set `SEED_DEMO_DATA=false` and start with a fresh database. Removing the local database volume is destructive:
 

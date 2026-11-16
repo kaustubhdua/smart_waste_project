@@ -16,7 +16,7 @@ docker compose up --build -d
 ```
 
 5. Open [http://localhost:8080](http://localhost:8080) for the operator console and [http://localhost:8080/driver.html](http://localhost:8080/driver.html) for the driver workspace.
-6. Follow the one-time administrator bootstrap flow in the operator console. Create named operator and driver accounts through the supported credential-management workflows.
+6. Create the initial administrator once with `POST /api/v1/auth/bootstrap`, sending the `API_TOKEN` from `.env` in the `X-Bootstrap-Token` header and a username plus password of at least 12 characters in the JSON body. Then sign in through the operator console. Create named operator and driver accounts through the supported credential-management workflows.
 
 The training seed is idempotent. It creates a small service area, collection points, fleet vehicles and timestamped telemetry history. The operator console includes these records in its normal tables, map, priority and dispatch workflows. The interface uses a compact **Training workspace** indicator rather than repeating provenance labels on every row. The indicator is intentional: generated records must not be mistaken for readings from calibrated physical devices.
 
