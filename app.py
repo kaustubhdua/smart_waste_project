@@ -395,7 +395,7 @@ if selected == "Overview":
             st.markdown(f'<div class="panel" style="padding:12px 14px;margin-bottom:9px"><div style="display:flex;justify-content:space-between"><b>{row["id"]}</b><span style="color:{color};font-size:12px;font-weight:700">{score:.0f} priority</span></div><div style="color:#91a99a;font-size:11px;margin:4px 0 8px">{row["area"]} · {row["type"]}</div><div style="height:6px;background:#263c30;border-radius:9px"><div style="height:6px;width:{row["fill_pct"]}%;background:{color};border-radius:9px"></div></div><div style="display:flex;justify-content:space-between;color:#a9c0b1;font-size:11px;margin-top:5px"><span>{row["fill_pct"]:.0f}% full</span><span>{row["capacity_l"]} L</span></div></div>',unsafe_allow_html=True)
     x,y = st.columns([1.2,1])
     with x:
-        st.markdown('<div class="section-head"><span>Collection activity · 24 hours</span></div>',unsafe_allow_html=True)
+        st.markdown('<div class="section-head"><span>Completed collections · 24 hours</span></div>',unsafe_allow_html=True)
         history=pd.DataFrame(data["history"]).set_index("time")
         st.area_chart(history[["collected"]],height=220,color="#70d69a")
     with y:
@@ -470,7 +470,7 @@ elif selected == "Bin network":
 # Route planner
 # ---------------------------------------------------------------------------
 elif selected == "Route planner":
-    st.markdown('<div class="panel" style="margin-bottom:16px"><div class="eyebrow">FLEET OPTIMIZATION</div><div style="font:700 17px Manrope;color:#eff8f1;margin:6px 0">Plan the next collection run</div><div style="color:#9bb3a5;font-size:12px">Prioritise collection points, respect vehicle capacity and distribute work across available vehicles.</div></div>',unsafe_allow_html=True)
+    st.markdown('<div class="panel" style="margin-bottom:16px"><div class="eyebrow">FLEET OPTIMIZATION</div><div style="font:700 17px Manrope;color:#eff8f1;margin:6px 0">Plan the next collection run</div><div style="color:#9bb3a5;font-size:12px">Prioritise collection points, respect vehicle capacity and distribute work across available vehicles. Distance values are coordinate-based planning estimates.</div></div>',unsafe_allow_html=True)
     eligible=[b for b in bins if b["fill_pct"]>=65]
     k1,k2,k3=st.columns(3)
     k1.metric("Points awaiting service",len(eligible))
@@ -577,7 +577,7 @@ elif selected == "Collection jobs":
             if create:
                 row=next(b for b in bins if b["id"]==manual_bin)
                 jid=f'JOB-{data["next_job"]}';data["next_job"]+=1
-                jobs.insert(0,{"id":jid,"bin_id":manual_bin,"area":row["area"],"priority":manual_priority,"status":"Assigned","vehicle":"Unassigned","created":datetime.now().strftime("%d %b, %H:%M")})
+                jobs.insert(0,{"id":jid,"bin_id":manual_bin,"area":row["area"],"priority":manual_priority,"status":"Detected","vehicle":"Unassigned","created":workspace_time().strftime("%d %b, %H:%M")})
                 log_event(f"Manual collection job created · {jid}")
                 st.success(f"{jid} created.")
         else: st.info("No collection points currently need a manual collection job.")
