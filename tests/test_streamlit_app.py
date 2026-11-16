@@ -103,6 +103,30 @@ class WasteOpsStreamlitTests(unittest.TestCase):
         self.assertTrue(after["telemetry_history"])
         self.assertTrue(any(job["status"] == "Detected" for job in after["jobs"]))
 
+    def test_route_optimizer_skips_bins_with_assigned_or_in_progress_jobs(self):
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
+        workspace = app.session_state["wasteops"]
+        workspace["jobs"][0]["status"] = "Assigned"
+        workspace["jobs"][0]["vehicle"] = "TRK-01"
+        next(row for row in workspace["vehicles"] if row["id"] == "TRK-01")["available"] = False
+        app.radio[0].set_value("Route planner").run()
+        next(button for button in app.button if button.label == "✦  Optimize collection routes").click().run()
+        self.assertFalse(app.exception, str(app.exception))
+        self.assertTrue(workspace["routes"])
+        self.assertTrue(all("BIN-003" not in route["bins"] for route in workspace["routes"].values()))
+
+    def test_manual_job_picker_excludes_collection_points_with_open_jobs(self):
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
+        workspace = app.session_state["wasteops"]
+        workspace["jobs"].append({
+            "id": "JOB-9000", "bin_id": "BIN-001", "area": "Sector 18",
+            "priority": "Medium", "status": "Assigned", "vehicle": "TRK-01",
+            "created": workspace["simulation_time"],
+        })
+        app.radio[0].set_value("Collection jobs").run()
+        picker = next(widget for widget in app.selectbox if widget.label == "Collection point")
+        self.assertNotIn("BIN-001", picker.options)
+
     def test_fuzzy_priority_is_bounded_and_monotonic_for_fill(self):
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=45).run()
         self.assertFalse(app.exception, str(app.exception))
