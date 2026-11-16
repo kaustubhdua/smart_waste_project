@@ -140,15 +140,13 @@ def make_workspace() -> dict:
         {"id":"TRK-04","driver":"Ananya Rao","type":"Mini truck","capacity_l":600,"available":True,"fuel_pct":54,"zone":"East","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
     ]
     jobs = [
-        {"id":"JOB-1042","bin_id":"BIN-003","area":"Sector 50","priority":"High","status":"Assigned","vehicle":"TRK-01","created":(now-timedelta(hours=2)).strftime("%d %b, %H:%M")},
-        {"id":"JOB-1041","bin_id":"BIN-011","area":"Sector 62","priority":"High","status":"In progress","vehicle":"TRK-02","created":(now-timedelta(hours=1)).strftime("%d %b, %H:%M")},
-        {"id":"JOB-1040","bin_id":"BIN-019","area":"Sector 76","priority":"Medium","status":"Completed","vehicle":"TRK-03","created":(now-timedelta(hours=4)).strftime("%d %b, %H:%M")},
-        {"id":"JOB-1039","bin_id":"BIN-007","area":"Sector 18","priority":"Medium","status":"Completed","vehicle":"TRK-04","created":(now-timedelta(hours=6)).strftime("%d %b, %H:%M")},
+        {"id":"JOB-1042","bin_id":"BIN-003","area":"Sector 50","priority":"High","status":"Detected","vehicle":"Unassigned","created":(now-timedelta(hours=2)).strftime("%d %b, %H:%M")},
+        {"id":"JOB-1041","bin_id":"BIN-011","area":"Sector 62","priority":"High","status":"Detected","vehicle":"Unassigned","created":(now-timedelta(hours=1)).strftime("%d %b, %H:%M")},
     ]
     history = []
     for hour in range(23, -1, -1):
         ts = now - timedelta(hours=hour)
-        history.append({"time":ts.strftime("%H:%M"),"collected":int(rng.integers(0,4)),"requests":int(rng.integers(0,3))})
+        history.append({"time":ts.strftime("%H:%M"),"collected":0,"requests":0})
     telemetry_history = []
     for row in bins:
         for offset in range(5, -1, -1):
@@ -159,7 +157,8 @@ def make_workspace() -> dict:
         match = next((row for row in bins if row["id"] == job["bin_id"]), None)
         if match:
             job["area"] = match["area"]
-    return {"bins":bins,"vehicles":vehicles,"jobs":jobs,"history":history,"telemetry_history":telemetry_history,"simulation_time":now.isoformat(timespec="minutes"),"simulation_cycles":0,"routes":{},"route_order":[],"events":[],"next_job":1043,"next_bin":31}
+    initial_routes = {}
+    return {"bins":bins,"vehicles":vehicles,"jobs":jobs,"history":history,"telemetry_history":telemetry_history,"simulation_time":now.isoformat(timespec="minutes"),"simulation_cycles":0,"routes":initial_routes,"route_order":list(initial_routes),"events":[],"next_job":1043,"next_bin":31}
 
 
 if "wasteops" not in st.session_state:
@@ -303,10 +302,14 @@ def make_route_plan(threshold: int = 65, capacity_override: int | None = None, s
     for index, (vehicle_key, result) in enumerate(optimized.items()):
         vehicle = vehicle_rows[index]
         route_bins = [candidates[i]["id"] for i in result["route_bin_indices"]]
+        if not route_bins:
+            continue
         coords = [DEPOT] + [[next(b for b in bins if b["id"] == bid)["latitude"],
                               next(b for b in bins if b["id"] == bid)["longitude"]] for bid in route_bins] + [DEPOT]
         km = sum(distance_km(coords[i],coords[i+1]) for i in range(len(coords)-1))
         routes[vehicle["id"]] = {"bins":route_bins,"load_l":int(result["total_load"]),"capacity_l":capacities[index],"distance_km":km}
+    if not routes:
+        return False, "The optimizer did not produce a non-empty vehicle route. Try a different threshold or fleet capacity."
     data["routes"] = routes
     data["route_order"] = list(routes)
     return True, f"Created {len(routes)} vehicle routes covering {sum(len(r['bins']) for r in routes.values())} collection points."
@@ -420,13 +423,12 @@ if selected == "Overview":
         st.area_chart(history[["collected"]],height=220,color="#70d69a")
     with y:
         st.markdown('<div class="section-head"><span>Recent activity</span></div>',unsafe_allow_html=True)
-        events=data["events"][:5] or [
-            {"time":"Today · 09:42","message":"Collection schedule refreshed"},
-            {"time":"Today · 09:18","message":"Vehicle TRK-02 started assigned route"},
-            {"time":"Today · 08:56","message":"Collection point BIN-019 serviced"},
-        ]
-        for event in events:
-            st.markdown(f'<div style="padding:10px 0;border-bottom:1px solid #20382b"><div style="color:#e4f1e8;font-size:12px">{event["message"]}</div><div style="color:#789382;font-size:10px;margin-top:4px">{event["time"]}</div></div>',unsafe_allow_html=True)
+        events=data["events"][:5]
+        if events:
+            for event in events:
+                st.markdown(f'<div style="padding:10px 0;border-bottom:1px solid #20382b"><div style="color:#e4f1e8;font-size:12px">{event["message"]}</div><div style="color:#789382;font-size:10px;margin-top:4px">{event["time"]}</div></div>',unsafe_allow_html=True)
+        else:
+            st.caption("No new activity in this workspace yet. Operations will appear here as you advance the scenario.")
 
 # ---------------------------------------------------------------------------
 # Bin network
@@ -482,7 +484,7 @@ elif selected == "Bin network":
         if add:
             rng=np.random.default_rng(data["next_bin"]*7)
             bid=f'BIN-{data["next_bin"]:03d}';data["next_bin"]+=1
-            bins.append({"id":bid,"area":new_area,"type":new_type,"latitude":DEPOT[0]+float(rng.uniform(-.02,.02)),"longitude":DEPOT[1]+float(rng.uniform(-.02,.02)),"capacity_l":int(new_capacity),"fill_pct":0.0,"temperature_c":27.0,"criticality":"Medium","last_collected":datetime.now().isoformat(timespec="minutes"),"status":"Normal","battery_pct":100})
+            bins.append({"id":bid,"area":new_area,"type":new_type,"latitude":DEPOT[0]+float(rng.uniform(-.02,.02)),"longitude":DEPOT[1]+float(rng.uniform(-.02,.02)),"capacity_l":int(new_capacity),"fill_pct":0.0,"temperature_c":27.0,"criticality":"Medium","last_collected":workspace_time().isoformat(timespec="minutes"),"status":"Normal","battery_pct":100})
             log_event(f"New collection point registered · {bid}")
             st.success(f"{bid} added to the network.")
 
@@ -531,14 +533,24 @@ elif selected == "Route planner":
                 st.progress(min(1,route["load_l"]/max(1,route["capacity_l"])))
                 st.caption(" → ".join(["Depot"]+route["bins"]+["Depot"]))
                 if st.button(f"Create jobs for {vehicle_id}",key=f"jobs_{vehicle_id}"):
+                    assigned_count = 0
                     for bid in route["bins"]:
-                        if not any(j["bin_id"]==bid and j["status"] in ("Assigned","In progress") for j in jobs):
+                        existing = next((j for j in jobs if j["bin_id"] == bid and j["status"] != "Completed"), None)
+                        if existing and existing["status"] == "Detected":
+                            existing["status"] = "Assigned"
+                            existing["vehicle"] = vehicle_id
+                            assigned_count += 1
+                        elif existing is None:
                             row=next(b for b in bins if b["id"]==bid)
                             jid=f'JOB-{data["next_job"]}';data["next_job"]+=1
-                            jobs.insert(0,{"id":jid,"bin_id":bid,"area":row["area"],"priority":"High" if priority_score(row)>=75 else "Medium","status":"Assigned","vehicle":vehicle_id,"created":datetime.now().strftime("%d %b, %H:%M")})
-                    vehicle["available"]=False
-                    log_event(f"Collection jobs created for {vehicle_id}")
-                    st.success(f"Jobs created and {vehicle_id} assigned.")
+                            jobs.insert(0,{"id":jid,"bin_id":bid,"area":row["area"],"priority":"High" if priority_score(row)>=75 else "Medium","status":"Assigned","vehicle":vehicle_id,"created":workspace_time().strftime("%d %b, %H:%M")})
+                            assigned_count += 1
+                    if assigned_count:
+                        vehicle["available"]=False
+                        log_event(f"{assigned_count} collection job(s) assigned to {vehicle_id}")
+                        st.success(f"{assigned_count} collection job(s) assigned to {vehicle_id}.")
+                    else:
+                        st.info("All points on this route already have an active assignment.")
     else:
         st.info("Choose your service threshold and optimize routes to generate vehicle schedules.")
 
@@ -630,10 +642,13 @@ elif selected == "Fleet":
                     st.progress(route_progress/100,text=f"Route progress · {route_progress:.0f}%")
             with r:
                 st.markdown(f'<span class="pill">{"AVAILABLE" if vehicle["available"] else "ON ROUTE"}</span>',unsafe_allow_html=True)
-                if st.button("Release" if not vehicle["available"] else "Set unavailable",key=f"fleet_{vehicle['id']}"):
+                has_active_jobs = any(j["vehicle"] == vehicle["id"] and j["status"] in ("Assigned", "In progress") for j in jobs)
+                if st.button("Release" if not vehicle["available"] else "Set unavailable",key=f"fleet_{vehicle['id']}",disabled=(not vehicle["available"] and has_active_jobs)):
                     vehicle["available"]=not vehicle["available"]
                     log_event(f'{vehicle["id"]} status changed')
                     st.rerun()
+                if not vehicle["available"] and has_active_jobs:
+                    st.caption("Complete or reassign active collections before releasing this vehicle.")
     with st.expander("Register a vehicle"):
         with st.form("new_vehicle"):
             a,b=st.columns(2)
@@ -646,7 +661,7 @@ elif selected == "Fleet":
         if add:
             if not vid.strip() or not driver.strip() or any(v["id"]==vid.strip() for v in vehicles):st.error("Enter a unique vehicle ID and driver name.")
             else:
-                vehicles.append({"id":vid.strip().upper(),"driver":driver.strip(),"type":vtype,"capacity_l":vcap,"available":True,"fuel_pct":100,"zone":"Unassigned"})
+                vehicles.append({"id":vid.strip().upper(),"driver":driver.strip(),"type":vtype,"capacity_l":vcap,"available":True,"fuel_pct":100,"zone":"Unassigned","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0})
                 log_event(f"Vehicle registered · {vid.upper()}")
                 st.success("Vehicle registered.")
 

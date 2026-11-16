@@ -37,7 +37,54 @@ class WasteOpsStreamlitTests(unittest.TestCase):
         workspace = app.session_state["wasteops"]
         self.assertTrue(workspace["routes"], "Expected the default fleet to receive a feasible route plan.")
         for route in workspace["routes"].values():
+            self.assertTrue(route["bins"], "Empty vehicle routes must not be presented as schedules.")
+            self.assertGreater(route["load_l"], 0)
             self.assertLessEqual(route["load_l"], route["capacity_l"])
+
+
+    def test_workspace_starts_with_consistent_fleet_and_no_fake_history(self):
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
+        self.assertFalse(app.exception, str(app.exception))
+        workspace = app.session_state["wasteops"]
+        self.assertEqual(workspace["events"], [])
+        self.assertTrue(all(row["collected"] == 0 and row["requests"] == 0 for row in workspace["history"]))
+        self.assertFalse(any(job["status"] == "Completed" for job in workspace["jobs"]))
+        self.assertTrue(all(job["status"] == "Detected" and job["vehicle"] == "Unassigned" for job in workspace["jobs"]))
+        self.assertTrue(all(vehicle["available"] for vehicle in workspace["vehicles"]))
+        self.assertEqual(workspace["routes"], {})
+
+    def test_route_dispatch_assigns_existing_detected_request(self):
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
+        workspace = app.session_state["wasteops"]
+        target = next(row for row in workspace["bins"] if row["id"] == "BIN-003")
+        workspace["routes"] = {
+            "TRK-01": {
+                "bins": ["BIN-003"],
+                "load_l": int(target["capacity_l"] * target["fill_pct"] / 100),
+                "capacity_l": 1200,
+                "distance_km": 0.0,
+            }
+        }
+        workspace["route_order"] = ["TRK-01"]
+        app.radio[0].set_value("Route planner").run()
+        dispatch = next(button for button in app.button if button.label == "Create jobs for TRK-01")
+        dispatch.click().run()
+        self.assertFalse(app.exception, str(app.exception))
+        request = next(job for job in workspace["jobs"] if job["bin_id"] == "BIN-003")
+        self.assertEqual(request["status"], "Assigned")
+        self.assertEqual(request["vehicle"], "TRK-01")
+        self.assertFalse(next(row for row in workspace["vehicles"] if row["id"] == "TRK-01")["available"])
+
+    def test_active_vehicle_cannot_be_released(self):
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
+        workspace = app.session_state["wasteops"]
+        workspace["jobs"][0]["status"] = "Assigned"
+        workspace["jobs"][0]["vehicle"] = "TRK-01"
+        next(vehicle for vehicle in workspace["vehicles"] if vehicle["id"] == "TRK-01")["available"] = False
+        app.radio[0].set_value("Fleet").run()
+        self.assertFalse(app.exception, str(app.exception))
+        release = next(button for button in app.button if button.label == "Release")
+        self.assertTrue(release.disabled)
 
     def test_training_cycle_advances_telemetry_and_opens_jobs(self):
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
