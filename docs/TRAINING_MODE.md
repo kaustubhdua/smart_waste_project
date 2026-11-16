@@ -38,9 +38,9 @@ The API container applies Alembic migrations before it seeds the training record
 The operator console is the sign-in interface; create the initial administrator once through the API bootstrap endpoint:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/bootstrap \\
-  -H 'Content-Type: application/json' \\
-  -H 'X-Bootstrap-Token: YOUR_API_TOKEN' \\
+curl -X POST http://localhost:8000/api/v1/auth/bootstrap \
+  -H 'Content-Type: application/json' \
+  -H 'X-Bootstrap-Token: YOUR_API_TOKEN' \
   -d '{"username":"admin","password":"Use-a-unique-password-12+"}'
 ```
 
