@@ -529,14 +529,24 @@ elif selected == "Route planner":
                 st.progress(min(1,route["load_l"]/max(1,route["capacity_l"])))
                 st.caption(" → ".join(["Depot"]+route["bins"]+["Depot"]))
                 if st.button(f"Create jobs for {vehicle_id}",key=f"jobs_{vehicle_id}"):
+                    assigned_count = 0
                     for bid in route["bins"]:
-                        if not any(j["bin_id"]==bid and j["status"] != "Completed" for j in jobs):
+                        existing = next((j for j in jobs if j["bin_id"] == bid and j["status"] != "Completed"), None)
+                        if existing and existing["status"] == "Detected":
+                            existing["status"] = "Assigned"
+                            existing["vehicle"] = vehicle_id
+                            assigned_count += 1
+                        elif existing is None:
                             row=next(b for b in bins if b["id"]==bid)
                             jid=f'JOB-{data["next_job"]}';data["next_job"]+=1
-                            jobs.insert(0,{"id":jid,"bin_id":bid,"area":row["area"],"priority":"High" if priority_score(row)>=75 else "Medium","status":"Assigned","vehicle":vehicle_id,"created":datetime.now().strftime("%d %b, %H:%M")})
-                    vehicle["available"]=False
-                    log_event(f"Collection jobs created for {vehicle_id}")
-                    st.success(f"Jobs created and {vehicle_id} assigned.")
+                            jobs.insert(0,{"id":jid,"bin_id":bid,"area":row["area"],"priority":"High" if priority_score(row)>=75 else "Medium","status":"Assigned","vehicle":vehicle_id,"created":workspace_time().strftime("%d %b, %H:%M")})
+                            assigned_count += 1
+                    if assigned_count:
+                        vehicle["available"]=False
+                        log_event(f"{assigned_count} collection job(s) assigned to {vehicle_id}")
+                        st.success(f"{assigned_count} collection job(s) assigned to {vehicle_id}.")
+                    else:
+                        st.info("All points on this route already have an active assignment.")
     else:
         st.info("Choose your service threshold and optimize routes to generate vehicle schedules.")
 
