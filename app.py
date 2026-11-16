@@ -18,6 +18,11 @@ from streamlit_folium import st_folium
 
 from person4_optimization import solve_vrp
 from person3_fuzzy_logic import calculate_priority as fuzzy_priority
+from wasteops_operations import (
+    complete_collection as _complete_collection,
+    record_telemetry as _record_telemetry,
+    route_distance_for_bins as _route_distance_for_bins,
+)
 
 st.set_page_config(
     page_title="WasteOps | Collection Operations",
@@ -199,71 +204,15 @@ def refresh_bin_status(row: dict):
 
 
 def record_telemetry(row: dict, stamp: datetime | None = None):
-    stamp = stamp or workspace_time()
-    data.setdefault("telemetry_history", []).append({
-        "bin_id": row["id"],
-        "time": stamp.isoformat(timespec="minutes"),
-        "fill_pct": round(float(row["fill_pct"]), 1),
-        "battery_pct": int(row["battery_pct"]),
-        "temperature_c": round(float(row.get("temperature_c", 25.0)), 1),
-    })
-    data["telemetry_history"] = data["telemetry_history"][-3000:]
+    _record_telemetry(data, row, stamp or workspace_time())
 
 
 def route_distance_for_bins(bin_ids: list[str]) -> float:
-    points = [DEPOT] + [
-        (next(row for row in bins if row["id"] == bin_id)["latitude"],
-         next(row for row in bins if row["id"] == bin_id)["longitude"])
-        for bin_id in bin_ids
-    ] + [DEPOT]
-    return sum(distance_km(points[i], points[i + 1]) for i in range(len(points) - 1))
+    return _route_distance_for_bins(bin_ids, bins, DEPOT)
 
 
 def record_collection_completion(job: dict):
-    """Apply the operational side effects of a completed collection exactly once."""
-    row = next((item for item in bins if item["id"] == job["bin_id"]), None)
-    if row is None:
-        raise ValueError("The collection point for this job no longer exists.")
-    stamp = workspace_time()
-    row["fill_pct"] = 0.0
-    row["last_collected"] = stamp.isoformat(timespec="minutes")
-    refresh_bin_status(row)
-    record_telemetry(row, stamp)
-
-    history = data.setdefault("history", [])
-    time_label = stamp.strftime("%H:%M")
-    if history and history[-1].get("time") == time_label:
-        history[-1]["collected"] = int(history[-1].get("collected", 0)) + 1
-    else:
-        history.append({"time": time_label, "collected": 1, "requests": 0})
-    data["history"] = history[-24:]
-
-    vehicle_id = job.get("vehicle", "Unassigned")
-    route = data.setdefault("routes", {}).get(vehicle_id)
-    if route:
-        route["bins"] = [bin_id for bin_id in route.get("bins", []) if bin_id != row["id"]]
-        if route["bins"]:
-            route["load_l"] = sum(
-                int(round(next(item for item in bins if item["id"] == bin_id)["capacity_l"] *
-                           next(item for item in bins if item["id"] == bin_id)["fill_pct"] / 100))
-                for bin_id in route["bins"]
-            )
-            route["distance_km"] = route_distance_for_bins(route["bins"])
-        else:
-            data["routes"].pop(vehicle_id, None)
-
-    vehicle = next((item for item in vehicles if item["id"] == vehicle_id), None)
-    still_active = any(
-        item["vehicle"] == vehicle_id and item["status"] in ("Assigned", "In progress")
-        for item in jobs if item is not job
-    )
-    if vehicle and not still_active:
-        vehicle["available"] = True
-        vehicle["route_progress_pct"] = 0.0
-        vehicle["latitude"], vehicle["longitude"] = DEPOT
-        data.setdefault("routes", {}).pop(vehicle_id, None)
-    data["route_order"] = list(data.get("routes", {}))
-
+    _complete_collection(data, bins, vehicles, jobs, job, workspace_time(), DEPOT)
 
 def advance_operations(hours: int = 1):
     """Advance the local training scenario through the operational state model."""
