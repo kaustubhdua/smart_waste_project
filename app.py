@@ -609,7 +609,7 @@ elif selected == "Collection jobs":
                 st.success(f"{jid} updated.")
     else: st.success("All collection jobs are complete.")
     with st.expander("Create a manual collection job"):
-        due=[b for b in bins if b["fill_pct"]>=40]
+        due=[b for b in bins if b["fill_pct"]>=40 and not any(j["bin_id"]==b["id"] and j["status"]!="Completed" for j in jobs)]
         if due:
             with st.form("manual_job"):
                 a,b=st.columns(2)
@@ -622,7 +622,7 @@ elif selected == "Collection jobs":
                 jobs.insert(0,{"id":jid,"bin_id":manual_bin,"area":row["area"],"priority":manual_priority,"status":"Detected","vehicle":"Unassigned","created":workspace_time().strftime("%d %b, %H:%M")})
                 log_event(f"Manual collection job created · {jid}")
                 st.success(f"{jid} created.")
-        else: st.info("No collection points currently need a manual collection job.")
+        else: st.info("No unassigned collection points currently meet the manual collection threshold.")
 
 # ---------------------------------------------------------------------------
 # Fleet
