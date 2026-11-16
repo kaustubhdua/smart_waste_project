@@ -37,6 +37,8 @@ class WasteOpsStreamlitTests(unittest.TestCase):
         workspace = app.session_state["wasteops"]
         self.assertTrue(workspace["routes"], "Expected the default fleet to receive a feasible route plan.")
         for route in workspace["routes"].values():
+            self.assertTrue(route["bins"], "Empty vehicle routes must not be presented as schedules.")
+            self.assertGreater(route["load_l"], 0)
             self.assertLessEqual(route["load_l"], route["capacity_l"])
 
 
