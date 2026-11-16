@@ -588,9 +588,9 @@ elif selected == "Collection jobs":
                     row["fill_pct"]=0.0;row["last_collected"]=workspace_time().isoformat(timespec="minutes");refresh_bin_status(row)
                     vehicle=next((v for v in vehicles if v["id"]==job["vehicle"]),None)
                     if vehicle and not any(j["vehicle"]==vehicle["id"] and j["status"] in ("Assigned","In progress") for j in jobs):
-                    vehicle["available"]=True
-                    vehicle["route_progress_pct"]=0.0
-                    vehicle["latitude"],vehicle["longitude"]=DEPOT
+                        vehicle["available"]=True
+                        vehicle["route_progress_pct"]=0.0
+                        vehicle["latitude"],vehicle["longitude"]=DEPOT
                 log_event(f"{jid} moved from {previous} to {action}"+(f" · {note}" if note else ""))
                 st.success(f"{jid} updated.")
     else: st.success("All collection jobs are complete.")
