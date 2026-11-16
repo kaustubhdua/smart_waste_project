@@ -35,7 +35,16 @@ The API container applies Alembic migrations before it seeds the training record
 
 ## 3. Create the administrator
 
-Open the operator console and follow the initial administrator bootstrap form. Use the `API_TOKEN` value from your local `.env` as the one-time bootstrap credential, then create a strong administrator password. After bootstrap, sign in using the named administrator account.
+The operator console is the sign-in interface; create the initial administrator once through the API bootstrap endpoint:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/bootstrap \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Bootstrap-Token: YOUR_API_TOKEN' \\
+  -d '{"username":"admin","password":"Use-a-unique-password-12+"}'
+```
+
+Use the `API_TOKEN` value from your local `.env` as the bootstrap header and a unique password of at least 12 characters. After bootstrap, sign in using the named administrator account.
 
 The shared bootstrap token is not the normal operator login credential. Use named accounts and expiring browser sessions for day-to-day access.
 
