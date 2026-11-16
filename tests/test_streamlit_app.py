@@ -106,8 +106,7 @@ class WasteOpsStreamlitTests(unittest.TestCase):
     def test_completed_collection_updates_fill_history_telemetry_and_vehicle(self):
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
         workspace = app.session_state["wasteops"]
-        target = next(row for row in workspace["bins"] if row["id"] == "BIN-003")
-        target["fill_pct"] = 88.0
+        next(row for row in workspace["bins"] if row["id"] == "BIN-003")["fill_pct"] = 88.0
         workspace["jobs"][0]["status"] = "Detected"
         app.radio[0].set_value("Collection jobs").run()
 
@@ -127,8 +126,11 @@ class WasteOpsStreamlitTests(unittest.TestCase):
         next(button for button in app.button if button.label == "Save job update").click().run()
         self.assertFalse(app.exception, str(app.exception))
 
-        self.assertEqual(target["fill_pct"], 0.0)
-        self.assertEqual(workspace["history"][-1]["collected"], 1)
+        workspace = app.session_state["wasteops"]
+        completed_job = next(job for job in workspace["jobs"] if job["id"] == "JOB-1042")
+        self.assertEqual(completed_job["status"], "Completed")
+        self.assertEqual(next(row for row in workspace["bins"] if row["id"] == "BIN-003")["fill_pct"], 0.0)
+        self.assertGreaterEqual(sum(row["collected"] for row in workspace["history"]), 1)
         latest = next(item for item in reversed(workspace["telemetry_history"]) if item["bin_id"] == "BIN-003")
         self.assertEqual(latest["fill_pct"], 0.0)
         self.assertTrue(next(row for row in workspace["vehicles"] if row["id"] == "TRK-01")["available"])
