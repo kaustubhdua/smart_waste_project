@@ -39,6 +39,33 @@ class WasteOpsStreamlitTests(unittest.TestCase):
         for route in workspace["routes"].values():
             self.assertLessEqual(route["load_l"], route["capacity_l"])
 
+    def test_training_cycle_advances_telemetry_and_opens_jobs(self):
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
+        self.assertFalse(app.exception, str(app.exception))
+        before = app.session_state["wasteops"]
+        previous_time = before["simulation_time"]
+        previous_cycles = before["simulation_cycles"]
+        previous_fills = {row["id"]: row["fill_pct"] for row in before["bins"]}
+        advance = next(button for button in app.button if button.label == "▶  Advance operations")
+        advance.click().run()
+        self.assertFalse(app.exception, str(app.exception))
+        after = app.session_state["wasteops"]
+        self.assertEqual(after["simulation_cycles"], previous_cycles + 1)
+        self.assertNotEqual(after["simulation_time"], previous_time)
+        self.assertTrue(all(row["fill_pct"] >= previous_fills[row["id"]] for row in after["bins"]))
+        self.assertTrue(after["telemetry_history"])
+        self.assertTrue(any(job["status"] == "Detected" for job in after["jobs"]))
+
+    def test_fuzzy_priority_is_bounded_and_monotonic_for_fill(self):
+        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=45).run()
+        self.assertFalse(app.exception, str(app.exception))
+        from person3_fuzzy_logic import calculate_priority
+        low = calculate_priority(20, 5, "Low")
+        high = calculate_priority(90, 5, "Low")
+        self.assertGreaterEqual(low, 0)
+        self.assertLessEqual(high, 100)
+        self.assertGreater(high, low)
+
 
 if __name__ == "__main__":
     unittest.main()
