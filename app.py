@@ -17,6 +17,7 @@ import folium
 from streamlit_folium import st_folium
 
 from person4_optimization import solve_vrp
+from person3_fuzzy_logic import calculate_priority as fuzzy_priority
 
 st.set_page_config(
     page_title="WasteOps | Collection Operations",
@@ -133,10 +134,10 @@ def make_workspace() -> dict:
             "battery_pct": int(rng.integers(62, 100)),
         })
     vehicles = [
-        {"id":"TRK-01","driver":"Aarav Sharma","type":"Compactor","capacity_l":1200,"available":True,"fuel_pct":82,"zone":"Central"},
-        {"id":"TRK-02","driver":"Meera Singh","type":"Tipper","capacity_l":900,"available":True,"fuel_pct":67,"zone":"North"},
-        {"id":"TRK-03","driver":"Kabir Verma","type":"Compactor","capacity_l":1500,"available":True,"fuel_pct":91,"zone":"South"},
-        {"id":"TRK-04","driver":"Ananya Rao","type":"Mini truck","capacity_l":600,"available":True,"fuel_pct":54,"zone":"East"},
+        {"id":"TRK-01","driver":"Aarav Sharma","type":"Compactor","capacity_l":1200,"available":True,"fuel_pct":82,"zone":"Central","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
+        {"id":"TRK-02","driver":"Meera Singh","type":"Tipper","capacity_l":900,"available":True,"fuel_pct":67,"zone":"North","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
+        {"id":"TRK-03","driver":"Kabir Verma","type":"Compactor","capacity_l":1500,"available":True,"fuel_pct":91,"zone":"South","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
+        {"id":"TRK-04","driver":"Ananya Rao","type":"Mini truck","capacity_l":600,"available":True,"fuel_pct":54,"zone":"East","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
     ]
     jobs = [
         {"id":"JOB-1042","bin_id":"BIN-003","area":"Sector 50","priority":"High","status":"Assigned","vehicle":"TRK-01","created":(now-timedelta(hours=2)).strftime("%d %b, %H:%M")},
@@ -147,8 +148,18 @@ def make_workspace() -> dict:
     history = []
     for hour in range(23, -1, -1):
         ts = now - timedelta(hours=hour)
-        history.append({"time":ts.strftime("%H:%M"),"collected":int(rng.integers(90,240)),"requests":int(rng.integers(3,13))})
-    return {"bins":bins,"vehicles":vehicles,"jobs":jobs,"history":history,"routes":{},"route_order":[],"events":[],"next_job":1043,"next_bin":31}
+        history.append({"time":ts.strftime("%H:%M"),"collected":int(rng.integers(0,4)),"requests":int(rng.integers(0,3))})
+    telemetry_history = []
+    for row in bins:
+        for offset in range(5, -1, -1):
+            stamp = now - timedelta(hours=offset)
+            fill_at_stamp = max(0.0, row["fill_pct"] - offset * 2.2)
+            telemetry_history.append({"bin_id":row["id"],"time":stamp.isoformat(timespec="minutes"),"fill_pct":round(fill_at_stamp,1),"battery_pct":row["battery_pct"],"temperature_c":row["temperature_c"]})
+    for job in jobs:
+        match = next((row for row in bins if row["id"] == job["bin_id"]), None)
+        if match:
+            job["area"] = match["area"]
+    return {"bins":bins,"vehicles":vehicles,"jobs":jobs,"history":history,"telemetry_history":telemetry_history,"simulation_time":now.isoformat(timespec="minutes"),"simulation_cycles":0,"routes":{},"route_order":[],"events":[],"next_job":1043,"next_bin":31}
 
 
 if "wasteops" not in st.session_state:
@@ -162,11 +173,13 @@ vehicles = data["vehicles"]
 jobs = data["jobs"]
 
 
+def workspace_time() -> datetime:
+    return datetime.fromisoformat(data.get("simulation_time", datetime.now().isoformat(timespec="minutes")))
+
+
 def priority_score(row: dict) -> float:
-    fill = float(row["fill_pct"])
-    criticality = {"High": 18, "Medium": 10, "Low": 4}.get(row["criticality"], 4)
-    age = max(0.0, (datetime.now() - datetime.fromisoformat(row["last_collected"])).total_seconds() / 3600)
-    return round(min(100, fill * .68 + min(age, 48) * .35 + criticality), 1)
+    age = max(0.0, (workspace_time() - datetime.fromisoformat(row["last_collected"])).total_seconds() / 3600)
+    return fuzzy_priority(float(row["fill_pct"]), min(age, 72), row["criticality"])
 
 
 def distance_km(a, b) -> float:
@@ -178,12 +191,57 @@ def distance_km(a, b) -> float:
 
 
 def log_event(message: str):
-    data["events"].insert(0, {"time":datetime.now().strftime("%d %b · %H:%M"),"message":message})
+    data["events"].insert(0, {"time":workspace_time().strftime("%d %b · %H:%M"),"message":message})
     data["events"] = data["events"][:30]
 
 
 def refresh_bin_status(row: dict):
     row["status"] = "Needs collection" if row["fill_pct"] >= 80 else ("Attention" if row["fill_pct"] >= 65 else "Normal")
+
+
+def advance_operations(hours: int = 1):
+    """Advance the local training scenario through the operational state model."""
+    if not 1 <= int(hours) <= 6:
+        raise ValueError("Advance between 1 and 6 hours at a time.")
+    data.setdefault("telemetry_history", [])
+    rng = np.random.default_rng(4200 + int(data.get("simulation_cycles", 0)))
+    created_jobs = 0
+    for _ in range(int(hours)):
+        stamp = workspace_time() + timedelta(hours=1)
+        hour_jobs = 0
+        for row in bins:
+            growth = float(rng.uniform(1.0, 4.8))
+            if row["type"] == "Organic waste":
+                growth *= 1.18
+            row["fill_pct"] = round(min(100.0, row["fill_pct"] + growth), 1)
+            row["temperature_c"] = round(float(np.clip(row["temperature_c"] + rng.normal(0, .45), 18, 46)), 1)
+            row["battery_pct"] = max(8, int(row["battery_pct"] - rng.choice([0, 0, 0, 1])))
+            refresh_bin_status(row)
+            data["telemetry_history"].append({"bin_id":row["id"],"time":stamp.isoformat(timespec="minutes"),"fill_pct":row["fill_pct"],"battery_pct":row["battery_pct"],"temperature_c":row["temperature_c"]})
+            open_job = any(j["bin_id"] == row["id"] and j["status"] != "Completed" for j in jobs)
+            if row["fill_pct"] >= 80 and not open_job:
+                jid = f'JOB-{data["next_job"]}'; data["next_job"] += 1
+                jobs.insert(0, {"id":jid,"bin_id":row["id"],"area":row["area"],"priority":"High" if priority_score(row) >= 80 else "Medium","status":"Detected","vehicle":"Unassigned","created":stamp.strftime("%d %b, %H:%M")})
+                created_jobs += 1
+                hour_jobs += 1
+        for vehicle in vehicles:
+            active_vehicle_jobs = any(j["vehicle"] == vehicle["id"] and j["status"] in ("Assigned", "In progress") for j in jobs)
+            route_bins = data.get("routes", {}).get(vehicle["id"], {}).get("bins", [])
+            if active_vehicle_jobs and route_bins:
+                path = [DEPOT] + [[next(b for b in bins if b["id"] == bid)["latitude"], next(b for b in bins if b["id"] == bid)["longitude"]] for bid in route_bins] + [DEPOT]
+                progress = min(100.0, float(vehicle.get("route_progress_pct", 0.0)) + float(rng.uniform(8, 20)))
+                position = progress / 100 * (len(path) - 1)
+                segment = min(int(position), len(path) - 2)
+                fraction = position - segment
+                vehicle["latitude"] = path[segment][0] + (path[segment + 1][0] - path[segment][0]) * fraction
+                vehicle["longitude"] = path[segment][1] + (path[segment + 1][1] - path[segment][1]) * fraction
+                vehicle["route_progress_pct"] = round(progress, 1)
+        data["history"].append({"time":stamp.strftime("%H:%M"),"collected":0,"requests":hour_jobs})
+        data["history"] = data["history"][-24:]
+        data["simulation_time"] = stamp.isoformat(timespec="minutes")
+        data["simulation_cycles"] = int(data.get("simulation_cycles", 0)) + 1
+    data["telemetry_history"] = data["telemetry_history"][-3000:]
+    log_event(f"Operations advanced {hours} hour(s) · {created_jobs} new collection requests")
 
 
 def build_map(selected_ids=None, route_lines=None, height=480):
@@ -198,6 +256,14 @@ def build_map(selected_ids=None, route_lines=None, height=480):
             tooltip=f'{row["id"]} · {row["fill_pct"]:.0f}% full',
             popup=f'<b>{row["id"]}</b><br>{row["area"]}<br>{row["fill_pct"]:.1f}% full<br>{row["capacity_l"]} L',
         ).add_to(m)
+    for vehicle in vehicles:
+        if vehicle.get("latitude") is not None and vehicle.get("longitude") is not None:
+            folium.Marker(
+                [vehicle["latitude"], vehicle["longitude"]],
+                tooltip=f'{vehicle["id"]} · {vehicle["driver"]}',
+                popup=f'<b>{vehicle["id"]}</b><br>{vehicle["driver"]}<br>{vehicle.get("route_progress_pct",0):.0f}% route progress',
+                icon=folium.Icon(color="blue", icon="truck", prefix="fa"),
+            ).add_to(m)
     route_colors = ["#73d7a0","#69aee8","#e6b65f","#c28be8"]
     for route_index, (vehicle, ordered) in enumerate((route_lines or {}).items()):
         coords = [DEPOT] + [[next(b for b in bins if b["id"] == bid)["latitude"],
@@ -262,6 +328,15 @@ with st.sidebar:
     st.markdown(f'<div style="color:#dce9e0;font-size:13px;margin:8px 0">● <span style="color:#8fe0b2">Workspace ready</span></div>', unsafe_allow_html=True)
     st.caption(f"{len(bins)} collection points · {len(vehicles)} vehicles")
     st.divider()
+    st.markdown('<div class="eyebrow">Scenario controls</div>', unsafe_allow_html=True)
+    st.caption("Advance the service area and generate new telemetry.")
+    advance_hours = st.selectbox("Advance by", [1, 2, 3, 6], index=0, format_func=lambda value: f"{value} hour" if value == 1 else f"{value} hours", key="advance_hours")
+    if st.button("▶  Advance operations", width="stretch"):
+        advance_operations(advance_hours)
+        st.success(f"Operations advanced by {advance_hours} hour(s).")
+        st.rerun()
+    st.caption(f"Scenario time · {workspace_time().strftime('%d %b · %H:%M')}")
+    st.divider()
     st.download_button(
         "↓  Save workspace",
         data=json.dumps(data, indent=2),
@@ -278,6 +353,9 @@ with st.sidebar:
                 raise ValueError("Workspace file is missing required sections.")
             if not all(isinstance(restored[key], list) for key in ("bins", "vehicles", "jobs", "history", "route_order", "events")):
                 raise ValueError("Workspace sections have an invalid format.")
+            restored.setdefault("telemetry_history", [])
+            restored.setdefault("simulation_time", datetime.now().isoformat(timespec="minutes"))
+            restored.setdefault("simulation_cycles", 0)
             st.session_state.wasteops = restored
             st.success("Workspace restored.")
             st.rerun()
@@ -292,7 +370,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Shared header and computed state
 # ---------------------------------------------------------------------------
-now = datetime.now()
+now = workspace_time()
 needs = [b for b in bins if b["fill_pct"] >= 80]
 attention = [b for b in bins if 65 <= b["fill_pct"] < 80]
 completed = [j for j in jobs if j["status"] == "Completed"]
@@ -337,7 +415,7 @@ if selected == "Overview":
             st.markdown(f'<div class="panel" style="padding:12px 14px;margin-bottom:9px"><div style="display:flex;justify-content:space-between"><b>{row["id"]}</b><span style="color:{color};font-size:12px;font-weight:700">{score:.0f} priority</span></div><div style="color:#91a99a;font-size:11px;margin:4px 0 8px">{row["area"]} · {row["type"]}</div><div style="height:6px;background:#263c30;border-radius:9px"><div style="height:6px;width:{row["fill_pct"]}%;background:{color};border-radius:9px"></div></div><div style="display:flex;justify-content:space-between;color:#a9c0b1;font-size:11px;margin-top:5px"><span>{row["fill_pct"]:.0f}% full</span><span>{row["capacity_l"]} L</span></div></div>',unsafe_allow_html=True)
     x,y = st.columns([1.2,1])
     with x:
-        st.markdown('<div class="section-head"><span>Collection activity · 24 hours</span></div>',unsafe_allow_html=True)
+        st.markdown('<div class="section-head"><span>Completed collections · 24 hours</span></div>',unsafe_allow_html=True)
         history=pd.DataFrame(data["history"]).set_index("time")
         st.area_chart(history[["collected"]],height=220,color="#70d69a")
     with y:
@@ -372,6 +450,15 @@ elif selected == "Bin network":
         if not table.empty:
             table["priority"]=table.apply(lambda r:priority_score(r.to_dict()),axis=1)
             st.dataframe(table[["id","area","type","fill_pct","capacity_l","status","priority","battery_pct"]].rename(columns={"id":"Bin ID","area":"Area","type":"Waste type","fill_pct":"Fill %","capacity_l":"Capacity (L)","status":"Status","priority":"Priority","battery_pct":"Battery %"}),width="stretch",hide_index=True)
+    if filtered:
+        st.markdown('<div class="section-head"><span>Recent telemetry</span><span>Fill trend</span></div>',unsafe_allow_html=True)
+        selected_telemetry_bin=st.selectbox("Collection point history",[row["id"] for row in filtered],key="telemetry_bin")
+        readings=[item for item in data.get("telemetry_history",[]) if item["bin_id"]==selected_telemetry_bin]
+        if readings:
+            trend=pd.DataFrame(readings).sort_values("time").tail(24).set_index("time")
+            st.line_chart(trend[["fill_pct"]],height=190,color="#72d69d")
+        else:
+            st.info("No telemetry history is available for this collection point yet.")
     st.markdown('<div class="section-head"><span>Collection point controls</span></div>',unsafe_allow_html=True)
     ids=[b["id"] for b in bins]
     with st.form("bin_update_form"):
@@ -403,7 +490,7 @@ elif selected == "Bin network":
 # Route planner
 # ---------------------------------------------------------------------------
 elif selected == "Route planner":
-    st.markdown('<div class="panel" style="margin-bottom:16px"><div class="eyebrow">FLEET OPTIMIZATION</div><div style="font:700 17px Manrope;color:#eff8f1;margin:6px 0">Plan the next collection run</div><div style="color:#9bb3a5;font-size:12px">Prioritise collection points, respect vehicle capacity and distribute work across available vehicles.</div></div>',unsafe_allow_html=True)
+    st.markdown('<div class="panel" style="margin-bottom:16px"><div class="eyebrow">FLEET OPTIMIZATION</div><div style="font:700 17px Manrope;color:#eff8f1;margin:6px 0">Plan the next collection run</div><div style="color:#9bb3a5;font-size:12px">Prioritise collection points, respect vehicle capacity and distribute work across available vehicles. Distance values are coordinate-based planning estimates.</div></div>',unsafe_allow_html=True)
     eligible=[b for b in bins if b["fill_pct"]>=65]
     k1,k2,k3=st.columns(3)
     k1.metric("Points awaiting service",len(eligible))
@@ -460,7 +547,7 @@ elif selected == "Route planner":
 # ---------------------------------------------------------------------------
 elif selected == "Collection jobs":
     f1,f2=st.columns([1,1])
-    with f1: job_status=st.selectbox("Filter by status",["All","Assigned","In progress","Completed"])
+    with f1: job_status=st.selectbox("Filter by status",["All","Detected","Assigned","In progress","Completed"])
     with f2: job_search=st.text_input("Find a job",placeholder="Job ID or bin ID")
     filtered=[j for j in jobs if (job_status=="All" or j["status"]==job_status) and (not job_search or job_search.lower() in j["id"].lower() or job_search.lower() in j["bin_id"].lower())]
     q1,q2,q3=st.columns(3)
@@ -470,20 +557,44 @@ elif selected == "Collection jobs":
     pending=[j for j in jobs if j["status"]!="Completed"]
     if pending:
         with st.form("job_update"):
-            a,b,c=st.columns(3)
+            a,b,c,d=st.columns([1.2,1,1.4,1.5])
             with a: jid=st.selectbox("Job", [j["id"] for j in pending])
-            with b: action=st.selectbox("New status",["In progress","Completed"])
-            with c: note=st.text_input("Service note",placeholder="Collection completed")
-            save=st.form_submit_button("Update job")
+            selected_job=next(j for j in pending if j["id"]==jid)
+            allowed = {"Detected":["Assigned"],"Assigned":["In progress"],"In progress":["Completed"]}.get(selected_job["status"],["Completed"])
+            with b: action=st.selectbox("Next status",allowed)
+            vehicle_options=["Unassigned"]+[v["id"] for v in vehicles]
+            current_vehicle=selected_job.get("vehicle","Unassigned")
+            with c: job_vehicle=st.selectbox("Vehicle",vehicle_options,index=vehicle_options.index(current_vehicle) if current_vehicle in vehicle_options else 0)
+            with d: note=st.text_input("Service note",placeholder="Collection completed")
+            save=st.form_submit_button("Save job update")
         if save:
-            job=next(j for j in jobs if j["id"]==jid);job["status"]=action
-            row=next((b for b in bins if b["id"]==job["bin_id"]),None)
-            if action=="Completed" and row:
-                row["fill_pct"]=0.0;row["last_collected"]=datetime.now().isoformat(timespec="minutes");refresh_bin_status(row)
-                vehicle=next((v for v in vehicles if v["id"]==job["vehicle"]),None)
-                if vehicle and not any(j["vehicle"]==vehicle["id"] and j["status"] in ("Assigned","In progress") for j in jobs):vehicle["available"]=True
-            log_event(f"{jid} marked {action.lower()}"+(f" · {note}" if note else ""))
-            st.success(f"{jid} updated.")
+            job=next(j for j in jobs if j["id"]==jid)
+            if action=="Assigned" and job_vehicle=="Unassigned":
+                st.error("Choose a vehicle before assigning this collection.")
+            elif action=="Assigned" and not next(v for v in vehicles if v["id"]==job_vehicle)["available"]:
+                st.error("That vehicle is not currently available.")
+            elif action=="Assigned" and next(b for b in bins if b["id"]==job["bin_id"])["capacity_l"] * next(b for b in bins if b["id"]==job["bin_id"])["fill_pct"] / 100 > next(v for v in vehicles if v["id"]==job_vehicle)["capacity_l"]:
+                st.error("This collection volume exceeds the selected vehicle's capacity.")
+            else:
+                previous=job["status"]; job["status"]=action
+                if action=="Assigned":
+                    job["vehicle"]=job_vehicle
+                    assigned_vehicle=next(v for v in vehicles if v["id"]==job_vehicle)
+                    assigned_vehicle["available"]=False
+                    if not data.get("routes", {}).get(job_vehicle, {}).get("bins"):
+                        data.setdefault("routes", {})[job_vehicle]={"bins":[job["bin_id"]],"load_l":int(next(b for b in bins if b["id"]==job["bin_id"])["capacity_l"] * next(b for b in bins if b["id"]==job["bin_id"])["fill_pct"] / 100),"capacity_l":assigned_vehicle["capacity_l"]}
+                        data["route_order"] = list(data["routes"])
+                    assigned_vehicle.setdefault("route_progress_pct", 0.0)
+                row=next((b for b in bins if b["id"]==job["bin_id"]),None)
+                if action=="Completed" and row:
+                    row["fill_pct"]=0.0;row["last_collected"]=workspace_time().isoformat(timespec="minutes");refresh_bin_status(row)
+                    vehicle=next((v for v in vehicles if v["id"]==job["vehicle"]),None)
+                    if vehicle and not any(j["vehicle"]==vehicle["id"] and j["status"] in ("Assigned","In progress") for j in jobs):
+                        vehicle["available"]=True
+                        vehicle["route_progress_pct"]=0.0
+                        vehicle["latitude"],vehicle["longitude"]=DEPOT
+                log_event(f"{jid} moved from {previous} to {action}"+(f" · {note}" if note else ""))
+                st.success(f"{jid} updated.")
     else: st.success("All collection jobs are complete.")
     with st.expander("Create a manual collection job"):
         due=[b for b in bins if b["fill_pct"]>=40]
@@ -496,7 +607,7 @@ elif selected == "Collection jobs":
             if create:
                 row=next(b for b in bins if b["id"]==manual_bin)
                 jid=f'JOB-{data["next_job"]}';data["next_job"]+=1
-                jobs.insert(0,{"id":jid,"bin_id":manual_bin,"area":row["area"],"priority":manual_priority,"status":"Assigned","vehicle":"Unassigned","created":datetime.now().strftime("%d %b, %H:%M")})
+                jobs.insert(0,{"id":jid,"bin_id":manual_bin,"area":row["area"],"priority":manual_priority,"status":"Detected","vehicle":"Unassigned","created":workspace_time().strftime("%d %b, %H:%M")})
                 log_event(f"Manual collection job created · {jid}")
                 st.success(f"{jid} created.")
         else: st.info("No collection points currently need a manual collection job.")
@@ -514,6 +625,9 @@ elif selected == "Fleet":
                 st.markdown(f"**{vehicle['id']}** · {vehicle['type']}")
                 st.caption(f"{vehicle['driver']} · {vehicle['zone']} zone · {vehicle['capacity_l']:,} L capacity")
                 st.progress(vehicle["fuel_pct"]/100,text=f"Fuel level · {vehicle['fuel_pct']}%")
+                route_progress=float(vehicle.get("route_progress_pct",0.0))
+                if route_progress > 0:
+                    st.progress(route_progress/100,text=f"Route progress · {route_progress:.0f}%")
             with r:
                 st.markdown(f'<span class="pill">{"AVAILABLE" if vehicle["available"] else "ON ROUTE"}</span>',unsafe_allow_html=True)
                 if st.button("Release" if not vehicle["available"] else "Set unavailable",key=f"fleet_{vehicle['id']}"):

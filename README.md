@@ -20,6 +20,8 @@ The primary application is the API-backed platform:
 
 The repository also retains a lightweight standalone Streamlit planning workspace in `app.py`. It is session-scoped and does not share state with the API-backed product.
 
+**Live training workspace:** [Open WasteOps on Streamlit Community Cloud](https://smartwasteproject-glmvz89ttkxfktcssfdfuc.streamlit.app/). The Streamlit entry point is `app.py` on `main`. Its training scenario advances on demand, records per-bin telemetry history, opens collection requests at the configured fill threshold, and supports the complete local job/fleet/route workflow. Each browser session has its own workspace; it is not a shared municipal operations database.
+
 ## Run a populated training workspace
 
 Requirements: Docker Compose v2.
