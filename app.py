@@ -302,10 +302,14 @@ def make_route_plan(threshold: int = 65, capacity_override: int | None = None, s
     for index, (vehicle_key, result) in enumerate(optimized.items()):
         vehicle = vehicle_rows[index]
         route_bins = [candidates[i]["id"] for i in result["route_bin_indices"]]
+        if not route_bins:
+            continue
         coords = [DEPOT] + [[next(b for b in bins if b["id"] == bid)["latitude"],
                               next(b for b in bins if b["id"] == bid)["longitude"]] for bid in route_bins] + [DEPOT]
         km = sum(distance_km(coords[i],coords[i+1]) for i in range(len(coords)-1))
         routes[vehicle["id"]] = {"bins":route_bins,"load_l":int(result["total_load"]),"capacity_l":capacities[index],"distance_km":km}
+    if not routes:
+        return False, "The optimizer did not produce a non-empty vehicle route. Try a different threshold or fleet capacity."
     data["routes"] = routes
     data["route_order"] = list(routes)
     return True, f"Created {len(routes)} vehicle routes covering {sum(len(r['bins']) for r in routes.values())} collection points."
