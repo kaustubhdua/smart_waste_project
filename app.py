@@ -573,6 +573,8 @@ elif selected == "Collection jobs":
                 st.error("Choose a vehicle before assigning this collection.")
             elif action=="Assigned" and not next(v for v in vehicles if v["id"]==job_vehicle)["available"]:
                 st.error("That vehicle is not currently available.")
+            elif action=="Assigned" and next(b for b in bins if b["id"]==job["bin_id"])["capacity_l"] * next(b for b in bins if b["id"]==job["bin_id"])["fill_pct"] / 100 > next(v for v in vehicles if v["id"]==job_vehicle)["capacity_l"]:
+                st.error("This collection volume exceeds the selected vehicle's capacity.")
             else:
                 previous=job["status"]; job["status"]=action
                 if action=="Assigned":
@@ -623,6 +625,9 @@ elif selected == "Fleet":
                 st.markdown(f"**{vehicle['id']}** · {vehicle['type']}")
                 st.caption(f"{vehicle['driver']} · {vehicle['zone']} zone · {vehicle['capacity_l']:,} L capacity")
                 st.progress(vehicle["fuel_pct"]/100,text=f"Fuel level · {vehicle['fuel_pct']}%")
+                route_progress=float(vehicle.get("route_progress_pct",0.0))
+                if route_progress > 0:
+                    st.progress(route_progress/100,text=f"Route progress · {route_progress:.0f}%")
             with r:
                 st.markdown(f'<span class="pill">{"AVAILABLE" if vehicle["available"] else "ON ROUTE"}</span>',unsafe_allow_html=True)
                 if st.button("Release" if not vehicle["available"] else "Set unavailable",key=f"fleet_{vehicle['id']}"):
