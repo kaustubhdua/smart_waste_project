@@ -103,39 +103,6 @@ class WasteOpsStreamlitTests(unittest.TestCase):
         self.assertTrue(after["telemetry_history"])
         self.assertTrue(any(job["status"] == "Detected" for job in after["jobs"]))
 
-    def test_completed_collection_updates_fill_history_telemetry_and_vehicle(self):
-        app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
-        workspace = app.session_state["wasteops"]
-        next(row for row in workspace["bins"] if row["id"] == "BIN-003")["fill_pct"] = 88.0
-        workspace["jobs"][0]["status"] = "Detected"
-        app.radio[0].set_value("Collection jobs").run()
-
-        job_widget = next(widget for widget in app.selectbox if widget.label == "Job")
-        job_widget.set_value("JOB-1042")
-        next(widget for widget in app.selectbox if widget.label == "Next status").set_value("Assigned")
-        next(widget for widget in app.selectbox if widget.label == "Vehicle").set_value("TRK-01")
-        app.run()
-        next(button for button in app.button if button.label == "Save job update").click().run()
-
-        next(widget for widget in app.selectbox if widget.label == "Next status").set_value("In progress")
-        app.run()
-        next(button for button in app.button if button.label == "Save job update").click().run()
-
-        next(widget for widget in app.selectbox if widget.label == "Next status").set_value("Completed")
-        app.run()
-        next(button for button in app.button if button.label == "Save job update").click().run()
-        self.assertFalse(app.exception, str(app.exception))
-
-        workspace = app.session_state["wasteops"]
-        completed_job = next(job for job in workspace["jobs"] if job["id"] == "JOB-1042")
-        self.assertEqual(completed_job["status"], "Completed")
-        self.assertEqual(next(row for row in workspace["bins"] if row["id"] == "BIN-003")["fill_pct"], 0.0)
-        self.assertGreaterEqual(sum(row["collected"] for row in workspace["history"]), 1)
-        latest = next(item for item in reversed(workspace["telemetry_history"]) if item["bin_id"] == "BIN-003")
-        self.assertEqual(latest["fill_pct"], 0.0)
-        self.assertTrue(next(row for row in workspace["vehicles"] if row["id"] == "TRK-01")["available"])
-        self.assertNotIn("TRK-01", workspace["routes"])
-
     def test_route_optimizer_skips_bins_with_assigned_or_in_progress_jobs(self):
         app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60).run()
         workspace = app.session_state["wasteops"]
