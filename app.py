@@ -148,7 +148,7 @@ def make_workspace() -> dict:
     history = []
     for hour in range(23, -1, -1):
         ts = now - timedelta(hours=hour)
-        history.append({"time":ts.strftime("%H:%M"),"collected":int(rng.integers(90,240)),"requests":int(rng.integers(3,13))})
+        history.append({"time":ts.strftime("%H:%M"),"collected":int(rng.integers(0,4)),"requests":int(rng.integers(0,3))})
     telemetry_history = []
     for row in bins:
         for offset in range(5, -1, -1):
@@ -191,7 +191,7 @@ def distance_km(a, b) -> float:
 
 
 def log_event(message: str):
-    data["events"].insert(0, {"time":datetime.now().strftime("%d %b · %H:%M"),"message":message})
+    data["events"].insert(0, {"time":workspace_time().strftime("%d %b · %H:%M"),"message":message})
     data["events"] = data["events"][:30]
 
 
@@ -203,10 +203,12 @@ def advance_operations(hours: int = 1):
     """Advance the local training scenario through the operational state model."""
     if not 1 <= int(hours) <= 6:
         raise ValueError("Advance between 1 and 6 hours at a time.")
+    data.setdefault("telemetry_history", [])
     rng = np.random.default_rng(4200 + int(data.get("simulation_cycles", 0)))
     created_jobs = 0
     for _ in range(int(hours)):
         stamp = workspace_time() + timedelta(hours=1)
+        hour_jobs = 0
         for row in bins:
             growth = float(rng.uniform(1.0, 4.8))
             if row["type"] == "Organic waste":
@@ -221,7 +223,8 @@ def advance_operations(hours: int = 1):
                 jid = f'JOB-{data["next_job"]}'; data["next_job"] += 1
                 jobs.insert(0, {"id":jid,"bin_id":row["id"],"area":row["area"],"priority":"High" if priority_score(row) >= 80 else "Medium","status":"Detected","vehicle":"Unassigned","created":stamp.strftime("%d %b, %H:%M")})
                 created_jobs += 1
-        data["history"].append({"time":stamp.strftime("%H:%M"),"collected":0,"requests":created_jobs})
+                hour_jobs += 1
+        data["history"].append({"time":stamp.strftime("%H:%M"),"collected":0,"requests":hour_jobs})
         data["history"] = data["history"][-24:]
         data["simulation_time"] = stamp.isoformat(timespec="minutes")
         data["simulation_cycles"] = int(data.get("simulation_cycles", 0)) + 1
@@ -330,6 +333,9 @@ with st.sidebar:
                 raise ValueError("Workspace file is missing required sections.")
             if not all(isinstance(restored[key], list) for key in ("bins", "vehicles", "jobs", "history", "route_order", "events")):
                 raise ValueError("Workspace sections have an invalid format.")
+            restored.setdefault("telemetry_history", [])
+            restored.setdefault("simulation_time", datetime.now().isoformat(timespec="minutes"))
+            restored.setdefault("simulation_cycles", 0)
             st.session_state.wasteops = restored
             st.success("Workspace restored.")
             st.rerun()
@@ -424,6 +430,15 @@ elif selected == "Bin network":
         if not table.empty:
             table["priority"]=table.apply(lambda r:priority_score(r.to_dict()),axis=1)
             st.dataframe(table[["id","area","type","fill_pct","capacity_l","status","priority","battery_pct"]].rename(columns={"id":"Bin ID","area":"Area","type":"Waste type","fill_pct":"Fill %","capacity_l":"Capacity (L)","status":"Status","priority":"Priority","battery_pct":"Battery %"}),width="stretch",hide_index=True)
+    if filtered:
+        st.markdown('<div class="section-head"><span>Recent telemetry</span><span>Fill trend</span></div>',unsafe_allow_html=True)
+        selected_telemetry_bin=st.selectbox("Collection point history",[row["id"] for row in filtered],key="telemetry_bin")
+        readings=[item for item in data.get("telemetry_history",[]) if item["bin_id"]==selected_telemetry_bin]
+        if readings:
+            trend=pd.DataFrame(readings).sort_values("time").tail(24).set_index("time")
+            st.line_chart(trend[["fill_pct"]],height=190,color="#72d69d")
+        else:
+            st.info("No telemetry history is available for this collection point yet.")
     st.markdown('<div class="section-head"><span>Collection point controls</span></div>',unsafe_allow_html=True)
     ids=[b["id"] for b in bins]
     with st.form("bin_update_form"):
