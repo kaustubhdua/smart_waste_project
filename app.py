@@ -198,6 +198,73 @@ def refresh_bin_status(row: dict):
     row["status"] = "Needs collection" if row["fill_pct"] >= 80 else ("Attention" if row["fill_pct"] >= 65 else "Normal")
 
 
+def record_telemetry(row: dict, stamp: datetime | None = None):
+    stamp = stamp or workspace_time()
+    data.setdefault("telemetry_history", []).append({
+        "bin_id": row["id"],
+        "time": stamp.isoformat(timespec="minutes"),
+        "fill_pct": round(float(row["fill_pct"]), 1),
+        "battery_pct": int(row["battery_pct"]),
+        "temperature_c": round(float(row.get("temperature_c", 25.0)), 1),
+    })
+    data["telemetry_history"] = data["telemetry_history"][-3000:]
+
+
+def route_distance_for_bins(bin_ids: list[str]) -> float:
+    points = [DEPOT] + [
+        (next(row for row in bins if row["id"] == bin_id)["latitude"],
+         next(row for row in bins if row["id"] == bin_id)["longitude"])
+        for bin_id in bin_ids
+    ] + [DEPOT]
+    return sum(distance_km(points[i], points[i + 1]) for i in range(len(points) - 1))
+
+
+def record_collection_completion(job: dict):
+    """Apply the operational side effects of a completed collection exactly once."""
+    row = next((item for item in bins if item["id"] == job["bin_id"]), None)
+    if row is None:
+        raise ValueError("The collection point for this job no longer exists.")
+    stamp = workspace_time()
+    row["fill_pct"] = 0.0
+    row["last_collected"] = stamp.isoformat(timespec="minutes")
+    refresh_bin_status(row)
+    record_telemetry(row, stamp)
+
+    history = data.setdefault("history", [])
+    time_label = stamp.strftime("%H:%M")
+    if history and history[-1].get("time") == time_label:
+        history[-1]["collected"] = int(history[-1].get("collected", 0)) + 1
+    else:
+        history.append({"time": time_label, "collected": 1, "requests": 0})
+    data["history"] = history[-24:]
+
+    vehicle_id = job.get("vehicle", "Unassigned")
+    route = data.setdefault("routes", {}).get(vehicle_id)
+    if route:
+        route["bins"] = [bin_id for bin_id in route.get("bins", []) if bin_id != row["id"]]
+        if route["bins"]:
+            route["load_l"] = sum(
+                int(round(next(item for item in bins if item["id"] == bin_id)["capacity_l"] *
+                           next(item for item in bins if item["id"] == bin_id)["fill_pct"] / 100))
+                for bin_id in route["bins"]
+            )
+            route["distance_km"] = route_distance_for_bins(route["bins"])
+        else:
+            data["routes"].pop(vehicle_id, None)
+
+    vehicle = next((item for item in vehicles if item["id"] == vehicle_id), None)
+    still_active = any(
+        item["vehicle"] == vehicle_id and item["status"] in ("Assigned", "In progress")
+        for item in jobs if item is not job
+    )
+    if vehicle and not still_active:
+        vehicle["available"] = True
+        vehicle["route_progress_pct"] = 0.0
+        vehicle["latitude"], vehicle["longitude"] = DEPOT
+        data.setdefault("routes", {}).pop(vehicle_id, None)
+    data["route_order"] = list(data.get("routes", {}))
+
+
 def advance_operations(hours: int = 1):
     """Advance the local training scenario through the operational state model."""
     if not 1 <= int(hours) <= 6:
@@ -216,7 +283,7 @@ def advance_operations(hours: int = 1):
             row["temperature_c"] = round(float(np.clip(row["temperature_c"] + rng.normal(0, .45), 18, 46)), 1)
             row["battery_pct"] = max(8, int(row["battery_pct"] - rng.choice([0, 0, 0, 1])))
             refresh_bin_status(row)
-            data["telemetry_history"].append({"bin_id":row["id"],"time":stamp.isoformat(timespec="minutes"),"fill_pct":row["fill_pct"],"battery_pct":row["battery_pct"],"temperature_c":row["temperature_c"]})
+            record_telemetry(row, stamp)
             open_job = any(j["bin_id"] == row["id"] and j["status"] != "Completed" for j in jobs)
             if row["fill_pct"] >= 80 and not open_job:
                 jid = f'JOB-{data["next_job"]}'; data["next_job"] += 1
@@ -274,11 +341,17 @@ def build_map(selected_ids=None, route_lines=None, height=480):
 
 
 def make_route_plan(threshold: int = 65, capacity_override: int | None = None, selected_vehicle_ids=None):
-    candidates = sorted([b for b in bins if b["fill_pct"] >= threshold], key=priority_score, reverse=True)
+    active_bin_ids = {
+        job["bin_id"] for job in jobs
+        if job["status"] in ("Assigned", "In progress")
+    }
+    candidates = sorted(
+        [b for b in bins if b["fill_pct"] >= threshold and b["id"] not in active_bin_ids],
+        key=priority_score,
+        reverse=True,
+    )
     if not candidates:
-        data["routes"] = {}
-        data["route_order"] = []
-        return False, "All collection points are within their service thresholds."
+        return False, "No unassigned collection points currently meet this service threshold."
     vehicle_rows = [v for v in vehicles if v["available"] and (selected_vehicle_ids is None or v["id"] in selected_vehicle_ids)]
     if not vehicle_rows:
         return False, "No available vehicles. Release a vehicle before planning routes."
@@ -310,9 +383,19 @@ def make_route_plan(threshold: int = 65, capacity_override: int | None = None, s
         routes[vehicle["id"]] = {"bins":route_bins,"load_l":int(result["total_load"]),"capacity_l":capacities[index],"distance_km":km}
     if not routes:
         return False, "The optimizer did not produce a non-empty vehicle route. Try a different threshold or fleet capacity."
-    data["routes"] = routes
-    data["route_order"] = list(routes)
-    return True, f"Created {len(routes)} vehicle routes covering {sum(len(r['bins']) for r in routes.values())} collection points."
+    # Preserve route records for vehicles that already own active work.
+    active_vehicle_ids = {
+        job["vehicle"] for job in jobs
+        if job["vehicle"] != "Unassigned" and job["status"] in ("Assigned", "In progress")
+    }
+    preserved = {
+        vehicle_id: route for vehicle_id, route in data.get("routes", {}).items()
+        if vehicle_id in active_vehicle_ids
+    }
+    preserved.update(routes)
+    data["routes"] = preserved
+    data["route_order"] = list(preserved)
+    return True, f"Created {len(routes)} new vehicle routes covering {sum(len(r['bins']) for r in routes.values())} collection points."
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +555,7 @@ elif selected == "Bin network":
         submitted=st.form_submit_button("Save collection point")
     if submitted:
         selected_bin["fill_pct"]=float(fill);selected_bin["battery_pct"]=int(battery);refresh_bin_status(selected_bin)
+        record_telemetry(selected_bin)
         log_event(f'{chosen} updated · {fill}% fill')
         st.success(f"{chosen} updated successfully.")
     with st.expander("Register a collection point"):
@@ -484,7 +568,9 @@ elif selected == "Bin network":
         if add:
             rng=np.random.default_rng(data["next_bin"]*7)
             bid=f'BIN-{data["next_bin"]:03d}';data["next_bin"]+=1
-            bins.append({"id":bid,"area":new_area,"type":new_type,"latitude":DEPOT[0]+float(rng.uniform(-.02,.02)),"longitude":DEPOT[1]+float(rng.uniform(-.02,.02)),"capacity_l":int(new_capacity),"fill_pct":0.0,"temperature_c":27.0,"criticality":"Medium","last_collected":workspace_time().isoformat(timespec="minutes"),"status":"Normal","battery_pct":100})
+            new_row={"id":bid,"area":new_area,"type":new_type,"latitude":DEPOT[0]+float(rng.uniform(-.02,.02)),"longitude":DEPOT[1]+float(rng.uniform(-.02,.02)),"capacity_l":int(new_capacity),"fill_pct":0.0,"temperature_c":27.0,"criticality":"Medium","last_collected":workspace_time().isoformat(timespec="minutes"),"status":"Normal","battery_pct":100}
+            bins.append(new_row)
+            record_telemetry(new_row)
             log_event(f"New collection point registered · {bid}")
             st.success(f"{bid} added to the network.")
 
@@ -493,7 +579,8 @@ elif selected == "Bin network":
 # ---------------------------------------------------------------------------
 elif selected == "Route planner":
     st.markdown('<div class="panel" style="margin-bottom:16px"><div class="eyebrow">FLEET OPTIMIZATION</div><div style="font:700 17px Manrope;color:#eff8f1;margin:6px 0">Plan the next collection run</div><div style="color:#9bb3a5;font-size:12px">Prioritise collection points, respect vehicle capacity and distribute work across available vehicles. Distance values are coordinate-based planning estimates.</div></div>',unsafe_allow_html=True)
-    eligible=[b for b in bins if b["fill_pct"]>=65]
+    active_bin_ids = {j["bin_id"] for j in jobs if j["status"] in ("Assigned", "In progress")}
+    eligible=[b for b in bins if b["fill_pct"]>=65 and b["id"] not in active_bin_ids]
     k1,k2,k3=st.columns(3)
     k1.metric("Points awaiting service",len(eligible))
     k2.metric("Available vehicles",sum(v["available"] for v in vehicles))
@@ -505,7 +592,8 @@ elif selected == "Route planner":
         active_vehicle_count=st.slider("Vehicles to deploy",1,max(1,len([v for v in vehicles if v["available"]])),min(3,max(1,len([v for v in vehicles if v["available"]]))))
         capacity_override=st.selectbox("Vehicle capacity",["Use fleet capacity","600 L","900 L","1,200 L","1,500 L"])
         if st.button("✦  Optimize collection routes",width="stretch"):
-            candidates=[b for b in bins if b["fill_pct"]>=threshold]
+            active_bin_ids = {j["bin_id"] for j in jobs if j["status"] in ("Assigned", "In progress")}
+            candidates=[b for b in bins if b["fill_pct"]>=threshold and b["id"] not in active_bin_ids]
             available=[v for v in vehicles if v["available"]][:active_vehicle_count]
             cap = int(capacity_override.replace(" L","").replace(",","")) if capacity_override!="Use fleet capacity" else None
             if not candidates: st.info("No collection points currently meet this threshold.")
@@ -593,18 +681,18 @@ elif selected == "Collection jobs":
                     job["vehicle"]=job_vehicle
                     assigned_vehicle=next(v for v in vehicles if v["id"]==job_vehicle)
                     assigned_vehicle["available"]=False
-                    if not data.get("routes", {}).get(job_vehicle, {}).get("bins"):
-                        data.setdefault("routes", {})[job_vehicle]={"bins":[job["bin_id"]],"load_l":int(next(b for b in bins if b["id"]==job["bin_id"])["capacity_l"] * next(b for b in bins if b["id"]==job["bin_id"])["fill_pct"] / 100),"capacity_l":assigned_vehicle["capacity_l"]}
-                        data["route_order"] = list(data["routes"])
+                    assigned_route=data.setdefault("routes", {}).setdefault(job_vehicle, {"bins": [], "load_l": 0, "capacity_l": assigned_vehicle["capacity_l"], "distance_km": 0.0})
+                    if job["bin_id"] not in assigned_route["bins"]:
+                        assigned_route["bins"].append(job["bin_id"])
+                    assigned_route["load_l"]=sum(
+                        int(round(next(item for item in bins if item["id"]==bid)["capacity_l"] * next(item for item in bins if item["id"]==bid)["fill_pct"] / 100))
+                        for bid in assigned_route["bins"]
+                    )
+                    assigned_route["distance_km"]=route_distance_for_bins(assigned_route["bins"])
+                    data["route_order"] = list(data["routes"])
                     assigned_vehicle.setdefault("route_progress_pct", 0.0)
-                row=next((b for b in bins if b["id"]==job["bin_id"]),None)
-                if action=="Completed" and row:
-                    row["fill_pct"]=0.0;row["last_collected"]=workspace_time().isoformat(timespec="minutes");refresh_bin_status(row)
-                    vehicle=next((v for v in vehicles if v["id"]==job["vehicle"]),None)
-                    if vehicle and not any(j["vehicle"]==vehicle["id"] and j["status"] in ("Assigned","In progress") for j in jobs):
-                        vehicle["available"]=True
-                        vehicle["route_progress_pct"]=0.0
-                        vehicle["latitude"],vehicle["longitude"]=DEPOT
+                if action=="Completed":
+                    record_collection_completion(job)
                 log_event(f"{jid} moved from {previous} to {action}"+(f" · {note}" if note else ""))
                 st.success(f"{jid} updated.")
     else: st.success("All collection jobs are complete.")
