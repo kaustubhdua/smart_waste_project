@@ -134,14 +134,14 @@ def make_workspace() -> dict:
             "battery_pct": int(rng.integers(62, 100)),
         })
     vehicles = [
-        {"id":"TRK-01","driver":"Aarav Sharma","type":"Compactor","capacity_l":1200,"available":False,"fuel_pct":82,"zone":"Central","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
-        {"id":"TRK-02","driver":"Meera Singh","type":"Tipper","capacity_l":900,"available":False,"fuel_pct":67,"zone":"North","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
+        {"id":"TRK-01","driver":"Aarav Sharma","type":"Compactor","capacity_l":1200,"available":True,"fuel_pct":82,"zone":"Central","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
+        {"id":"TRK-02","driver":"Meera Singh","type":"Tipper","capacity_l":900,"available":True,"fuel_pct":67,"zone":"North","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
         {"id":"TRK-03","driver":"Kabir Verma","type":"Compactor","capacity_l":1500,"available":True,"fuel_pct":91,"zone":"South","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
         {"id":"TRK-04","driver":"Ananya Rao","type":"Mini truck","capacity_l":600,"available":True,"fuel_pct":54,"zone":"East","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
     ]
     jobs = [
-        {"id":"JOB-1042","bin_id":"BIN-003","area":"Sector 50","priority":"High","status":"Assigned","vehicle":"TRK-01","created":(now-timedelta(hours=2)).strftime("%d %b, %H:%M")},
-        {"id":"JOB-1041","bin_id":"BIN-011","area":"Sector 62","priority":"High","status":"In progress","vehicle":"TRK-02","created":(now-timedelta(hours=1)).strftime("%d %b, %H:%M")},
+        {"id":"JOB-1042","bin_id":"BIN-003","area":"Sector 50","priority":"High","status":"Detected","vehicle":"Unassigned","created":(now-timedelta(hours=2)).strftime("%d %b, %H:%M")},
+        {"id":"JOB-1041","bin_id":"BIN-011","area":"Sector 62","priority":"High","status":"Detected","vehicle":"Unassigned","created":(now-timedelta(hours=1)).strftime("%d %b, %H:%M")},
     ]
     history = []
     for hour in range(23, -1, -1):
@@ -158,15 +158,6 @@ def make_workspace() -> dict:
         if match:
             job["area"] = match["area"]
     initial_routes = {}
-    for vehicle_id, bin_id in (("TRK-01", "BIN-003"), ("TRK-02", "BIN-011")):
-        row = next(item for item in bins if item["id"] == bin_id)
-        vehicle = next(item for item in vehicles if item["id"] == vehicle_id)
-        initial_routes[vehicle_id] = {
-            "bins": [bin_id],
-            "load_l": int(row["capacity_l"] * row["fill_pct"] / 100),
-            "capacity_l": vehicle["capacity_l"],
-            "distance_km": 0.0,
-        }
     return {"bins":bins,"vehicles":vehicles,"jobs":jobs,"history":history,"telemetry_history":telemetry_history,"simulation_time":now.isoformat(timespec="minutes"),"simulation_cycles":0,"routes":initial_routes,"route_order":list(initial_routes),"events":[],"next_job":1043,"next_bin":31}
 
 
