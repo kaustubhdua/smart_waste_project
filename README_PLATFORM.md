@@ -1,16 +1,54 @@
-# Legacy API platform notes
+# WasteOps — API-backed training and operations platform
 
-The currently supported product entry point is the standalone Streamlit workspace in [app.py](README.md).
+The primary product experience is the browser-based operator console and driver workspace backed by FastAPI and PostgreSQL/PostGIS. The root Streamlit application remains available as a lightweight, standalone planning workspace; it is not connected to the API-backed platform.
 
-The API-backed implementation, browser consoles, Docker Compose stack, PostgreSQL/PostGIS migrations, and related deployment notes in this repository are retained as legacy development material. They are **not** started by the Streamlit application, are **not** required to run it, and are not connected to its workspace state.
+## Start a populated training environment
 
-For the supported experience:
+Requirements: Docker Compose v2.
 
-1. Install the root dependencies with `pip install -r requirements.txt`.
-2. Start the app with `streamlit run app.py`.
-3. Use the sidebar to navigate the six workspace modules.
-4. Use **Save workspace** and **Restore workspace** to carry editable state between sessions.
+1. Copy `.env.example` to `.env`.
+2. Set unique local values for `POSTGRES_PASSWORD` and `API_TOKEN`.
+3. Set `SEED_DEMO_DATA=true` in `.env`. This is an explicit non-production choice; the backend refuses demo seeding in production.
+4. Start the stack:
 
-The standalone workspace does not ingest physical sensor telemetry, authenticate real operators or drivers, persist records to a server database, or provide turn-by-turn road routing. Do not interpret its workspace values or coordinate-based route estimates as verified field measurements.
+```bash
+docker compose up --build -d
+```
 
-See [README.md](README.md) for the supported product setup, deployment and test instructions.
+5. Open [http://localhost:8080](http://localhost:8080) for the operator console and [http://localhost:8080/driver.html](http://localhost:8080/driver.html) for the driver workspace.
+6. Follow the one-time administrator bootstrap flow in the operator console. Create named operator and driver accounts through the supported credential-management workflows.
+
+The training seed is idempotent. It creates a small service area, collection points, fleet vehicles and timestamped telemetry history. The operator console includes these records in its normal tables, map, priority and dispatch workflows. The interface uses a compact **Training workspace** indicator rather than repeating provenance labels on every row. The indicator is intentional: generated records must not be mistaken for readings from calibrated physical devices.
+
+To run without generated records, set `SEED_DEMO_DATA=false` and start with a fresh database volume. To reset a local training environment, stop the stack and remove its local database volume only when you are comfortable losing all workspace data:
+
+```bash
+docker compose down -v
+docker compose up --build -d
+```
+
+## What the platform exercises
+
+- Persistent bin, vehicle, telemetry, job, route-plan and service-event records.
+- Operator bootstrap, named accounts, role-aware access, session revocation and audit events.
+- Device-scoped telemetry ingestion, message idempotency, timestamp/freshness validation and historical CSV import.
+- Sugeno fuzzy collection urgency and capacity-constrained route optimization using a road-routing provider.
+- Approval, dispatch, driver stop workflows, completion/exception handling and vehicle release.
+- Driver offline cache and idempotent queued actions while the driver workspace is open or reopened.
+- Optional next-observation model inference when a compatible, versioned artifact and sufficient recent telemetry are available.
+
+## Verify
+
+```bash
+docker compose ps
+curl --fail http://localhost:8000/health
+curl --fail http://localhost:8000/health/ready
+```
+
+Run backend tests from the repository root using the backend environment described in `backend/requirements.txt`, then run the root Python tests using `requirements.txt`. GitHub Actions also contains API, browser and Compose validation workflows.
+
+## Important boundaries
+
+The training environment exercises real application code, database writes, optimization and workflow transitions. Its preloaded records are generated examples, not physical sensor readings or verified municipal service events. The model is a next-observation estimator, not a calibrated long-horizon forecast. Public OSRM is a development routing dependency and has no service guarantee. Production still requires calibrated hardware, representative field validation, managed secrets, HTTPS ingress, durable backups, monitoring, load/security/accessibility review and a controlled municipal pilot.
+
+See `docs/IMPLEMENTATION_STATUS.md`, `docs/DEPLOYMENT_RUNBOOK.md` and `docs/RELEASE_CHECKLIST.md` for implementation boundaries and release gates.

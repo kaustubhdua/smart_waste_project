@@ -2,85 +2,94 @@
 
 # ♻️ WasteOps — Smart Waste Collection & Fleet Optimization
 
-**Monitor → prioritize → plan → collect → improve**
+**Monitor → prioritize → dispatch → collect → verify**
 
-A polished, interactive waste-collection operations workspace built with Streamlit, Python, Folium and Google OR-Tools.
-
-[![Python CI](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/ci.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions)
-[![CodeQL](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/codeql.yml/badge.svg)](https://github.com/kaustubhdua/smart_waste_project/actions/workflows/codeql.yml)
-![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
-![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)
-![Routing](https://img.shields.io/badge/Optimization-OR--Tools-4285F4)
+A browser-based waste operations platform with persistent records, authenticated operator and driver workflows, telemetry ingestion, fuzzy prioritization and capacity-aware route optimization.
 
 </div>
 
-WasteOps provides an end-to-end interactive product experience without requiring a separate API server, database, cloud credentials, IoT hardware or paid routing service. The workspace opens with a ready-to-use service-area scenario. Collection points, jobs, vehicles and route plans are interactive and editable. Changes remain in the active browser session; use **Save workspace** to export a JSON snapshot and **Restore workspace** to continue from a saved snapshot. This standalone edition does not connect to municipal infrastructure or physical sensors.
+## Product experience
 
-## Product modules
+The primary application is the API-backed platform:
 
-- **Operations overview:** fleet and collection KPIs, service-area map, priority queue, activity timeline and recent events.
-- **Collection point network:** searchable bins, area/type/status filters, map and table views, fill/battery controls and registration.
-- **Route planner:** configurable pickup threshold, fleet selection, capacity-aware OR-Tools CVRP optimization, route map, vehicle schedules and job creation.
-- **Collection management:** create and filter jobs, assign/update statuses, complete service and automatically reset collection-point fill.
-- **Fleet management:** vehicle and driver roster, capacity/fuel indicators, availability controls and vehicle registration.
-- **Performance analytics:** fill distribution, service mix, activity trends and CSV exports.
-- **Workspace continuity:** export and restore the complete workspace as JSON, or reset it from the sidebar.
+- **Operator console:** collection-point map, telemetry history, priority queue, job approval, fleet management, route planning, dispatch, audit and exports.
+- **Driver workspace:** vehicle-scoped stops, navigation handoff, start/complete/exception actions and an offline action queue.
+- **Operations backend:** FastAPI, PostgreSQL, Alembic migrations, device-scoped ingestion, idempotency, role-aware authentication and service-event history.
+- **Optimization:** Sugeno fuzzy urgency scoring, road-network distance/geometry provider and Google OR-Tools capacity-constrained vehicle routing.
+- **Forecasting:** optional versioned Random Forest next-observation inference; disabled for dispatch by default.
 
-## Run locally
+The repository also retains a lightweight standalone Streamlit planning workspace in `app.py`. It is session-scoped and does not share state with the API-backed product.
 
-Requirements: Python 3.11 or newer.
+## Run a populated training workspace
+
+Requirements: Docker Compose v2.
+
+1. Copy `.env.example` to `.env`.
+2. Replace `POSTGRES_PASSWORD` and `API_TOKEN` with unique local secrets.
+3. Set `SEED_DEMO_DATA=true` for a non-production training environment.
+4. Start the complete stack:
 
 ```bash
-git clone https://github.com/kaustubhdua/smart_waste_project.git
-cd smart_waste_project
+docker compose up --build -d
+```
+
+5. Open:
+   - Operator console: http://localhost:8080
+   - Driver workspace: http://localhost:8080/driver.html
+   - API health: http://localhost:8000/health
+
+The training seed is idempotent and preloads 16 collection points, four vehicles, six hourly observations per point, driver identities and collection jobs in multiple workflow states. Newly created driver tokens are printed once in the API container logs:
+
+```bash
+docker compose logs api
+```
+
+Use the one-time administrator bootstrap flow in the operator console, then sign in and exercise approval, dispatch, driver actions, completion and verification. The console shows a compact **Training workspace** indicator; it does not repeat demo-source labels on every operational row. This environment indicator is deliberate because generated training records must not be mistaken for readings from physical devices.
+
+For an empty environment, set `SEED_DEMO_DATA=false` and start with a fresh database. Removing the local database volume is destructive:
+
+```bash
+docker compose down -v
+```
+
+See [the training guide](docs/TRAINING_MODE.md) for the complete walkthrough.
+
+## Run the standalone Streamlit workspace
+
+Requirements: Python 3.11+.
+
+```bash
 python -m venv .venv
-
-# macOS / Linux
-source .venv/bin/activate
-
-# Windows PowerShell
-# .venv\Scripts\Activate.ps1
-
+# Windows PowerShell: .venv\\Scripts\\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Open the local URL printed by Streamlit (normally http://localhost:8501).
+This lightweight edition provides editable bins, jobs, vehicles, OR-Tools planning, analytics and JSON/CSV export. Its state is browser-session scoped and its coordinate-based route display is not turn-by-turn road routing.
 
-## Deploy
-
-The app can be deployed directly to Streamlit Community Cloud:
-
-1. Sign in at https://share.streamlit.io/.
-2. Select this GitHub repository and the `main` branch.
-3. Set the app entry point to `app.py`.
-4. Deploy.
-
-No environment secrets or backend services are required. The map uses public OpenStreetMap tiles and the Python dependencies are declared in `requirements.txt`.
-
-## Route planning
-
-The route planner calls the repository's OR-Tools capacitated vehicle-routing solver. It distributes collection stops across available vehicles subject to vehicle capacity. The displayed route distance is an estimate derived from geographic coordinates; the map connects the planned stops and does not claim turn-by-turn road routing.
-
-## Project structure
+## Repository layout
 
 | Path | Purpose |
 |---|---|
-| `app.py` | Complete Streamlit product and interactive workspace |
-| `person4_optimization.py` | OR-Tools vehicle-routing solver |
-| `person1_preprocessing.py` | Data preparation utilities |
-| `person2_ml_prediction.py` | Optional model-training utilities; not required by the app |
-| `person3_fuzzy_logic.py` | Priority-scoring utilities |
-| `tests/` | Python unit tests |
-| `.streamlit/config.toml` | Theme configuration |
-| `requirements.txt` | Runtime dependencies |
+| `backend/app/` | FastAPI application, persistence, auth, routing, optimization and priority |
+| `backend/migrations/` | Alembic database migrations |
+| `backend/scripts/seed_demo.py` | Opt-in, idempotent training scenario |
+| `backend/tests/` | API, auth, configuration, routing and optimizer tests |
+| `web/` | Operator console, driver workspace and offline service worker |
+| `app.py` | Standalone Streamlit planning workspace |
+| `person1_preprocessing.py` | Dataset preprocessing |
+| `person2_ml_prediction.py` | Model training and artifact generation |
+| `person3_fuzzy_logic.py` | Fuzzy-priority compatibility API |
+| `person4_optimization.py` | Standalone OR-Tools CVRP module |
+| `docs/` | Implementation status, training, security and deployment runbooks |
 
-## Tests
+## Verification
 
-```bash
-pip install -r requirements.txt
-python -m unittest discover -s tests -v
-python -m compileall -q app.py person1_preprocessing.py person2_ml_prediction.py person3_fuzzy_logic.py person4_optimization.py
-```
+The repository's GitHub Actions workflows cover Python tests, API/auth/routing tests, browser checks, accessibility checks, container builds and Compose smoke tests. A configured workflow is not proof of a passing run: inspect the exact commit's Actions result before release.
 
-Route distance is estimated from geographic coordinates; it is not a road-network distance or a field-validated dispatch ETA. Workspace values are editable planning inputs, not a live sensor feed.
+## Data and production boundaries
+
+The training environment executes the real application code and persists its workflow changes, but its preloaded records are generated examples. They are not live municipal telemetry or independently verified collection events. The Random Forest component predicts the next observed fill value; it is not a validated long-horizon forecast. Public OSRM is a development routing dependency without a service guarantee.
+
+Production still requires calibrated hardware, representative field validation, a contracted or self-hosted routing service, HTTPS ingress, managed secrets, durable backups, monitoring, load/security/accessibility review and a controlled municipal pilot. See [implementation status](docs/IMPLEMENTATION_STATUS.md), [deployment runbook](docs/DEPLOYMENT_RUNBOOK.md) and [release checklist](docs/RELEASE_CHECKLIST.md).
