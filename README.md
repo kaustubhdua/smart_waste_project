@@ -47,9 +47,9 @@ docker compose logs api
 Create the initial administrator once through the API bootstrap endpoint (the operator console is the sign-in interface):
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/bootstrap \\
-  -H 'Content-Type: application/json' \\
-  -H 'X-Bootstrap-Token: YOUR_API_TOKEN' \\
+curl -X POST http://localhost:8000/api/v1/auth/bootstrap \
+  -H 'Content-Type: application/json' \
+  -H 'X-Bootstrap-Token: YOUR_API_TOKEN' \
   -d '{"username":"admin","password":"Use-a-unique-password-12+"}'
 ```
 
