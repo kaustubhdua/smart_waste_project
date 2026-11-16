@@ -134,10 +134,10 @@ def make_workspace() -> dict:
             "battery_pct": int(rng.integers(62, 100)),
         })
     vehicles = [
-        {"id":"TRK-01","driver":"Aarav Sharma","type":"Compactor","capacity_l":1200,"available":True,"fuel_pct":82,"zone":"Central"},
-        {"id":"TRK-02","driver":"Meera Singh","type":"Tipper","capacity_l":900,"available":True,"fuel_pct":67,"zone":"North"},
-        {"id":"TRK-03","driver":"Kabir Verma","type":"Compactor","capacity_l":1500,"available":True,"fuel_pct":91,"zone":"South"},
-        {"id":"TRK-04","driver":"Ananya Rao","type":"Mini truck","capacity_l":600,"available":True,"fuel_pct":54,"zone":"East"},
+        {"id":"TRK-01","driver":"Aarav Sharma","type":"Compactor","capacity_l":1200,"available":True,"fuel_pct":82,"zone":"Central","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
+        {"id":"TRK-02","driver":"Meera Singh","type":"Tipper","capacity_l":900,"available":True,"fuel_pct":67,"zone":"North","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
+        {"id":"TRK-03","driver":"Kabir Verma","type":"Compactor","capacity_l":1500,"available":True,"fuel_pct":91,"zone":"South","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
+        {"id":"TRK-04","driver":"Ananya Rao","type":"Mini truck","capacity_l":600,"available":True,"fuel_pct":54,"zone":"East","latitude":DEPOT[0],"longitude":DEPOT[1],"route_progress_pct":0.0},
     ]
     jobs = [
         {"id":"JOB-1042","bin_id":"BIN-003","area":"Sector 50","priority":"High","status":"Assigned","vehicle":"TRK-01","created":(now-timedelta(hours=2)).strftime("%d %b, %H:%M")},
@@ -224,6 +224,18 @@ def advance_operations(hours: int = 1):
                 jobs.insert(0, {"id":jid,"bin_id":row["id"],"area":row["area"],"priority":"High" if priority_score(row) >= 80 else "Medium","status":"Detected","vehicle":"Unassigned","created":stamp.strftime("%d %b, %H:%M")})
                 created_jobs += 1
                 hour_jobs += 1
+        for vehicle in vehicles:
+            active_vehicle_jobs = any(j["vehicle"] == vehicle["id"] and j["status"] in ("Assigned", "In progress") for j in jobs)
+            route_bins = data.get("routes", {}).get(vehicle["id"], {}).get("bins", [])
+            if active_vehicle_jobs and route_bins:
+                path = [DEPOT] + [[next(b for b in bins if b["id"] == bid)["latitude"], next(b for b in bins if b["id"] == bid)["longitude"]] for bid in route_bins] + [DEPOT]
+                progress = min(100.0, float(vehicle.get("route_progress_pct", 0.0)) + float(rng.uniform(8, 20)))
+                position = progress / 100 * (len(path) - 1)
+                segment = min(int(position), len(path) - 2)
+                fraction = position - segment
+                vehicle["latitude"] = path[segment][0] + (path[segment + 1][0] - path[segment][0]) * fraction
+                vehicle["longitude"] = path[segment][1] + (path[segment + 1][1] - path[segment][1]) * fraction
+                vehicle["route_progress_pct"] = round(progress, 1)
         data["history"].append({"time":stamp.strftime("%H:%M"),"collected":0,"requests":hour_jobs})
         data["history"] = data["history"][-24:]
         data["simulation_time"] = stamp.isoformat(timespec="minutes")
@@ -244,6 +256,14 @@ def build_map(selected_ids=None, route_lines=None, height=480):
             tooltip=f'{row["id"]} · {row["fill_pct"]:.0f}% full',
             popup=f'<b>{row["id"]}</b><br>{row["area"]}<br>{row["fill_pct"]:.1f}% full<br>{row["capacity_l"]} L',
         ).add_to(m)
+    for vehicle in vehicles:
+        if vehicle.get("latitude") is not None and vehicle.get("longitude") is not None:
+            folium.Marker(
+                [vehicle["latitude"], vehicle["longitude"]],
+                tooltip=f'{vehicle["id"]} · {vehicle["driver"]}',
+                popup=f'<b>{vehicle["id"]}</b><br>{vehicle["driver"]}<br>{vehicle.get("route_progress_pct",0):.0f}% route progress',
+                icon=folium.Icon(color="blue", icon="truck", prefix="fa"),
+            ).add_to(m)
     route_colors = ["#73d7a0","#69aee8","#e6b65f","#c28be8"]
     for route_index, (vehicle, ordered) in enumerate((route_lines or {}).items()):
         coords = [DEPOT] + [[next(b for b in bins if b["id"] == bid)["latitude"],
@@ -557,12 +577,20 @@ elif selected == "Collection jobs":
                 previous=job["status"]; job["status"]=action
                 if action=="Assigned":
                     job["vehicle"]=job_vehicle
-                    next(v for v in vehicles if v["id"]==job_vehicle)["available"]=False
+                    assigned_vehicle=next(v for v in vehicles if v["id"]==job_vehicle)
+                    assigned_vehicle["available"]=False
+                    if not data.get("routes", {}).get(job_vehicle, {}).get("bins"):
+                        data.setdefault("routes", {})[job_vehicle]={"bins":[job["bin_id"]],"load_l":int(next(b for b in bins if b["id"]==job["bin_id"])["capacity_l"] * next(b for b in bins if b["id"]==job["bin_id"])["fill_pct"] / 100),"capacity_l":assigned_vehicle["capacity_l"]}
+                        data["route_order"] = list(data["routes"])
+                    assigned_vehicle.setdefault("route_progress_pct", 0.0)
                 row=next((b for b in bins if b["id"]==job["bin_id"]),None)
                 if action=="Completed" and row:
                     row["fill_pct"]=0.0;row["last_collected"]=workspace_time().isoformat(timespec="minutes");refresh_bin_status(row)
                     vehicle=next((v for v in vehicles if v["id"]==job["vehicle"]),None)
-                    if vehicle and not any(j["vehicle"]==vehicle["id"] and j["status"] in ("Assigned","In progress") for j in jobs):vehicle["available"]=True
+                    if vehicle and not any(j["vehicle"]==vehicle["id"] and j["status"] in ("Assigned","In progress") for j in jobs):
+                    vehicle["available"]=True
+                    vehicle["route_progress_pct"]=0.0
+                    vehicle["latitude"],vehicle["longitude"]=DEPOT
                 log_event(f"{jid} moved from {previous} to {action}"+(f" · {note}" if note else ""))
                 st.success(f"{jid} updated.")
     else: st.success("All collection jobs are complete.")
