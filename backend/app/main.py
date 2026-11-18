@@ -832,7 +832,7 @@ async def optimize_route(payload: RouteRequest, db: Session = Depends(get_db)):
     except (OptimizationError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc
     plan_id = str(uuid4())
-    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": "OSRM", "solver": optimized["solver"], "data_mode": "telemetry-derived demand; verify sensor calibration before operational use"}
+    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": settings.routing_provider.upper(), "solver": optimized["solver"], "data_mode": "telemetry-derived demand; verify sensor calibration before operational use"}
     db.add(RoutePlan(id=plan_id, depot_latitude=payload.depot_latitude, depot_longitude=payload.depot_longitude, routing_provider=settings.routing_provider.upper(), solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
     db.commit()
     return {"route_plan_id": plan_id, **response_payload}
@@ -1021,7 +1021,7 @@ async def dispatch_approved_jobs(payload: DispatchRequest, principal: dict = Dep
         db.rollback()
         raise HTTPException(422, str(exc)) from exc
     plan_id = str(uuid4())
-    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": "OSRM", "solver": optimized["solver"], "assigned_job_ids": sorted(assigned_job_ids), "data_mode": "approved jobs with fresh telemetry; verify sensor calibration before operational use"}
+    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": settings.routing_provider.upper(), "solver": optimized["solver"], "assigned_job_ids": sorted(assigned_job_ids), "data_mode": "approved jobs with fresh telemetry; verify sensor calibration before operational use"}
     db.add(RoutePlan(id=plan_id, depot_latitude=depot[0], depot_longitude=depot[1], routing_provider=settings.routing_provider.upper(), solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
     db.commit()
     return {"route_plan_id": plan_id, **response_payload}

@@ -156,6 +156,7 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
 
     monkeypatch.setattr(main_module, "road_matrix", fake_matrix)
     monkeypatch.setattr(main_module, "road_route", fake_route)
+    monkeypatch.setattr(main_module.settings, "routing_provider", "ors")
     for bin_id, longitude in (("dispatch-a",77.20),("dispatch-b",77.21)):
         b = {"id":bin_id,"latitude":28.6,"longitude":longitude,"capacity_liters":1000,"criticality":2,"source":"live"}
         assert client.post("/api/v1/bins", json=b, headers=OP).status_code == 201
@@ -163,6 +164,12 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
         device_headers = register_device(device_id, bin_id)
         telemetry = {"bin_id":bin_id,"device_id":device_id,"message_id":"now-"+bin_id,"fill_percent":30,"measured_at":datetime.now(timezone.utc).isoformat()}
         assert client.post("/api/v1/telemetry", json=telemetry, headers=device_headers).status_code == 202
+    preview = client.post("/api/v1/routes/optimize", json={
+        "bin_ids": ["dispatch-a", "dispatch-b"], "depot_latitude": 28.6,
+        "depot_longitude": 77.2, "num_vehicles": 1, "vehicle_capacity_liters": 500,
+    }, headers=OP)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["routing_provider"] == "ORS"
     jobs = []
     for bin_id in ("dispatch-a","dispatch-b"):
         job = client.post("/api/v1/jobs", json={"bin_id":bin_id,"demand_liters":100}, headers=OP).json()
@@ -173,6 +180,7 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
     response = client.post("/api/v1/routes/dispatch", json={"job_ids":jobs,"vehicle_ids":["dispatch-truck"]}, headers=OP)
     assert response.status_code == 200, response.text
     assert sorted(response.json()["assigned_job_ids"]) == sorted(jobs)
+    assert response.json()["routing_provider"] == "ORS"
     for job_id in jobs:
         persisted = client.get("/api/v1/jobs", headers=OP).json()
         found = next(j for j in persisted if j["id"] == job_id)
