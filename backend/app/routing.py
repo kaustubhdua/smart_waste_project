@@ -186,3 +186,62 @@ async def _ors_route(coordinates: list[tuple[float, float]]) -> dict:
     ):
         raise RoutingError("Openrouteservice returned invalid route coordinates")
     return {"distance_meters": distance, "duration_seconds": duration, "geometry": {"type": "LineString", "coordinates": [[point[0], point[1]] for point in points]}}
+
+
+# --- Estimated-distance fallback (never used in production) -----------------
+DETOUR_FACTOR = 1.35          # straight-line -> typical urban road distance
+AVERAGE_SPEED_MPS = 30 / 3.6  # 30 km/h urban average
+
+
+def fallback_allowed() -> bool:
+    return bool(settings.routing_fallback) and settings.app_env.strip().lower() != "production"
+
+
+def _haversine_meters(a: tuple[float, float], b: tuple[float, float]) -> float:
+    from math import asin, cos, radians, sin, sqrt
+
+    lat1, lon1, lat2, lon2 = map(radians, (a[0], a[1], b[0], b[1]))
+    h = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
+    return 2 * 6371008.8 * asin(sqrt(h))
+
+
+def estimated_matrix(coordinates: list[tuple[float, float]]) -> dict:
+    distances = [
+        [0.0 if i == j else round(_haversine_meters(a, b) * DETOUR_FACTOR, 1) for j, b in enumerate(coordinates)]
+        for i, a in enumerate(coordinates)
+    ]
+    durations = [[round(d / AVERAGE_SPEED_MPS, 1) for d in row] for row in distances]
+    return {"distances_meters": distances, "durations_seconds": durations, "estimated": True}
+
+
+def estimated_route(coordinates: list[tuple[float, float]]) -> dict:
+    distance = sum(
+        _haversine_meters(coordinates[i], coordinates[i + 1]) * DETOUR_FACTOR
+        for i in range(len(coordinates) - 1)
+    )
+    return {
+        "distance_meters": round(distance, 1),
+        "duration_seconds": round(distance / AVERAGE_SPEED_MPS, 1),
+        "geometry": {"type": "LineString", "coordinates": [[lon, lat] for lat, lon in coordinates]},
+        "estimated": True,
+    }
+
+
+async def resilient_matrix(coordinates: list[tuple[float, float]]) -> dict:
+    """Road matrix; falls back to a labelled estimate outside production."""
+    try:
+        return await road_matrix(coordinates)
+    except RoutingError:
+        if not fallback_allowed() or len(coordinates) < 2:
+            raise
+        return estimated_matrix(coordinates)
+
+
+async def resilient_route(coordinates: list[tuple[float, float]]) -> dict:
+    """Road route geometry; falls back to a labelled estimate outside production."""
+    try:
+        return await road_route(coordinates)
+    except RoutingError:
+        if not fallback_allowed() or len(coordinates) < 2:
+            raise
+        return estimated_route(coordinates)

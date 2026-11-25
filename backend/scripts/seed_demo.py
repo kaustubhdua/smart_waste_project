@@ -31,7 +31,7 @@ def seed():
         # A varied service area gives the map, priority queue and optimizer
         # enough records to demonstrate realistic multi-vehicle workflows.
         for index in range(1, 17):
-            bin_id = f"DEMO-BIN-{index:02d}"
+            bin_id = f"BIN-{index:02d}"
             row = db.get(Bin, bin_id)
             if row is None:
                 row = Bin(
@@ -46,10 +46,10 @@ def seed():
             bins.append(row)
 
         vehicle_specs = (
-            ("DEMO-TRUCK-01", 1800),
-            ("DEMO-TRUCK-02", 2200),
-            ("DEMO-TRUCK-03", 1600),
-            ("DEMO-TRUCK-04", 2000),
+            ("TRUCK-01", 1800),
+            ("TRUCK-02", 2200),
+            ("TRUCK-03", 1600),
+            ("TRUCK-04", 2000),
         )
         for vehicle_id, capacity in vehicle_specs:
             if db.get(Vehicle, vehicle_id) is None:
@@ -92,7 +92,7 @@ def seed():
         # Four driver identities make the separate driver workspace usable.
         # Tokens are only shown once, at creation, and only their hashes persist.
         for index, (vehicle_id, _) in enumerate(vehicle_specs, start=1):
-            driver_id = f"DEMO-DRIVER-{index:02d}"
+            driver_id = f"DRIVER-{index:02d}"
             if db.get(Driver, driver_id) is None:
                 raw_token = token_urlsafe(32)
                 db.add(Driver(
@@ -105,7 +105,7 @@ def seed():
 
         # Seed two assigned stops for the driver workflow and additional
         # detected jobs for operator approval and dispatch practice.
-        assigned_bins = {"DEMO-BIN-06": "DEMO-TRUCK-01", "DEMO-BIN-08": "DEMO-TRUCK-02"}
+        assigned_bins = {"BIN-06": "TRUCK-01", "BIN-08": "TRUCK-02"}
         for bin_row in bins:
             fill = latest_fill[bin_row.id]
             if fill < 65:
@@ -121,7 +121,7 @@ def seed():
             demand = round(bin_row.capacity_liters * fill / 100, 1)
             priority = calculate_priority(fill, 5.0, bin_row.criticality)
             job = CollectionJob(
-                id=f"TRAIN-{bin_row.id}",
+                id=f"JOB-{bin_row.id}",
                 bin_id=bin_row.id,
                 status="assigned" if vehicle_id else "detected",
                 demand_liters=demand,
