@@ -18,6 +18,7 @@ from streamlit_folium import st_folium
 
 from person4_optimization import solve_vrp
 from person3_fuzzy_logic import calculate_priority as fuzzy_priority
+from person2_ml_prediction import FEATURES as MODEL_FEATURES, load_ml_model
 from wasteops_operations import (
     complete_collection as _complete_collection,
     record_telemetry as _record_telemetry,
@@ -259,17 +260,75 @@ def advance_operations(hours: int = 1):
     log_event(f"Operations advanced {hours} hour(s) · {created_jobs} new collection requests")
 
 
+@st.cache_resource
+def load_forecast_model():
+    try:
+        return load_ml_model()
+    except Exception:
+        return None
+
+
+def predict_next_fill(row: dict) -> float | None:
+    model = load_forecast_model()
+    if model is None:
+        return None
+    readings = sorted(
+        [item for item in data.get("telemetry_history", []) if item["bin_id"] == row["id"]],
+        key=lambda item: item["time"],
+    )
+    if len(readings) < 4:
+        return None
+    now_ts = workspace_time()
+    recent = readings[-6:]
+    feature_row = {
+        "capacity_liters": float(row["capacity_l"]),
+        "temperature_c": float(row["temperature_c"]),
+        "hour": now_ts.hour,
+        "day_of_week": now_ts.weekday(),
+        "is_weekend": int(now_ts.weekday() >= 5),
+        "fill_lag_1h": float(readings[-2]["fill_pct"]),
+        "fill_lag_3h": float(readings[-4]["fill_pct"]),
+        "rolling_mean_6h": float(np.mean([r["fill_pct"] for r in recent])),
+    }
+    frame = pd.DataFrame([[feature_row[name] for name in MODEL_FEATURES]], columns=MODEL_FEATURES)
+    pred = float(model.predict(frame)[0])
+    return round(float(np.clip(pred, 0.0, 100.0)), 1)
+
+
 def build_map(selected_ids=None, route_lines=None, height=480):
     selected_ids = set(selected_ids or [])
-    m = folium.Map(location=DEPOT, zoom_start=12, tiles="OpenStreetMap", control_scale=True)
+    m = folium.Map(location=DEPOT, zoom_start=12, tiles="CartoDB dark_matter", control_scale=True)
+    folium.Circle(
+        DEPOT,
+        radius=260,
+        color="#58c89a",
+        fill=True,
+        fill_color="#58c89a",
+        fill_opacity=0.12,
+        weight=1,
+    ).add_to(m)
     folium.Marker(DEPOT, tooltip="WasteOps depot", icon=folium.Icon(color="green", icon="home")).add_to(m)
     for row in bins:
         color = "#f05b5b" if row["fill_pct"] >= 80 else ("#f2bd55" if row["fill_pct"] >= 65 else "#55c98b")
+        is_selected = row["id"] in selected_ids
         folium.CircleMarker(
-            [row["latitude"],row["longitude"]], radius=8 if row["id"] in selected_ids else 6,
-            color=color, fill=True, fill_color=color, fill_opacity=.9,
-            tooltip=f'{row["id"]} · {row["fill_pct"]:.0f}% full',
-            popup=f'<b>{row["id"]}</b><br>{row["area"]}<br>{row["fill_pct"]:.1f}% full<br>{row["capacity_l"]} L',
+            [row["latitude"], row["longitude"]],
+            radius=9 if is_selected else 6,
+            color="#ffffff" if is_selected else color,
+            weight=2 if is_selected else 1.5,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.92,
+            tooltip=f'{row["id"]} · {row["fill_pct"]:.0f}% full ({row["area"]})',
+            popup=(
+                f'<div style="font-family:sans-serif;min-width:150px">'
+                f'<b>{row["id"]}</b> · {row["area"]}<br>'
+                f'Fill: <b>{row["fill_pct"]:.1f}%</b><br>'
+                f'Type: {row["type"]}<br>'
+                f'Capacity: {row["capacity_l"]} L<br>'
+                f'Priority: {priority_score(row):.0f}/100'
+                f'</div>'
+            ),
         ).add_to(m)
     for vehicle in vehicles:
         if vehicle.get("latitude") is not None and vehicle.get("longitude") is not None:
@@ -279,13 +338,36 @@ def build_map(selected_ids=None, route_lines=None, height=480):
                 popup=f'<b>{vehicle["id"]}</b><br>{vehicle["driver"]}<br>{vehicle.get("route_progress_pct",0):.0f}% route progress',
                 icon=folium.Icon(color="blue", icon="truck", prefix="fa"),
             ).add_to(m)
-    route_colors = ["#73d7a0","#69aee8","#e6b65f","#c28be8"]
+    route_colors = ["#73d7a0", "#69aee8", "#e6b65f", "#c28be8"]
     for route_index, (vehicle, ordered) in enumerate((route_lines or {}).items()):
-        coords = [DEPOT] + [[next(b for b in bins if b["id"] == bid)["latitude"],
-                              next(b for b in bins if b["id"] == bid)["longitude"]] for bid in ordered] + [DEPOT]
+        route_color = route_colors[route_index % len(route_colors)]
+        stop_coords = [
+            [next(b for b in bins if b["id"] == bid)["latitude"], next(b for b in bins if b["id"] == bid)["longitude"]]
+            for bid in ordered
+        ]
+        coords = [DEPOT] + stop_coords + [DEPOT]
         if len(coords) > 2:
-            folium.PolyLine(coords, color=route_colors[route_index % len(route_colors)],
-                            weight=4, opacity=.85, tooltip=vehicle).add_to(m)
+            folium.PolyLine(
+                coords,
+                color=route_color,
+                weight=4,
+                opacity=0.88,
+                tooltip=f"{vehicle} · {len(ordered)} stops",
+            ).add_to(m)
+            for stop_num, (bid, sc) in enumerate(zip(ordered, stop_coords), start=1):
+                folium.Marker(
+                    sc,
+                    tooltip=f"{vehicle} Stop #{stop_num}: {bid}",
+                    icon=folium.DivIcon(
+                        html=(
+                            f'<div style="background:{route_color};color:#081411;font-weight:800;'
+                            f'font-size:10px;width:18px;height:18px;border-radius:50%;'
+                            f'display:flex;align-items:center;justify-content:center;'
+                            f'border:1.5px solid #081411;box-shadow:0 2px 6px rgba(0,0,0,.45)">'
+                            f'{stop_num}</div>'
+                        )
+                    ),
+                ).add_to(m)
     return m
 
 
@@ -433,21 +515,82 @@ with right:
 # ---------------------------------------------------------------------------
 if selected == "Overview":
     st.markdown('<div class="section-head"><span>Operations snapshot</span><span>Current workspace</span></div>', unsafe_allow_html=True)
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Bins monitored",len(bins),help="Collection points in the current workspace.")
-    c2.metric("Requiring pickup",len(needs),help=f"{len(attention)} additional points are approaching the service threshold.")
-    c3.metric("Active collections",len(active_jobs),help=f"{len(completed)} jobs are marked completed in this workspace.")
-    c4.metric("Average fill level",f"{avg_fill:.0f}%",help="Average across the collection points in this workspace.")
-    a,b = st.columns([1.65,1])
+    hist_df = pd.DataFrame(data["history"])
+    req_spark = hist_df["requests"].tolist()[-12:] if not hist_df.empty else [0]
+    col_spark = hist_df["collected"].tolist()[-12:] if not hist_df.empty else [0]
+    fill_spark = [
+        round(float(np.mean([r["fill_pct"] for r in bins])) - offset * 1.4, 1)
+        for offset in range(5, -1, -1)
+    ] if bins else [0]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(
+        "Bins monitored",
+        len(bins),
+        delta=f"{len(bins) - len(needs) - len(attention)} normal",
+        delta_color="off",
+        border=True,
+        help="Collection points in the current workspace.",
+    )
+    c2.metric(
+        "Requiring pickup",
+        len(needs),
+        delta=f"{len(attention)} approaching",
+        delta_color="inverse" if needs else "off",
+        border=True,
+        chart_data=req_spark,
+        chart_type="bar",
+        help=f"{len(attention)} additional points are approaching the service threshold.",
+    )
+    c3.metric(
+        "Active collections",
+        len(active_jobs),
+        delta=f"{len(completed)} completed",
+        delta_color="normal" if completed else "off",
+        border=True,
+        chart_data=col_spark,
+        chart_type="bar",
+        help=f"{len(completed)} jobs are marked completed in this workspace.",
+    )
+    c4.metric(
+        "Average fill level",
+        f"{avg_fill:.0f}%",
+        delta=f"{sum(v['available'] for v in vehicles)}/{len(vehicles)} trucks ready",
+        delta_color="off",
+        border=True,
+        chart_data=fill_spark,
+        chart_type="line",
+        help="Average across the collection points in this workspace.",
+    )
+    a, b = st.columns([1.65, 1])
     with a:
         st.markdown('<div class="section-head"><span>Collection point activity</span><span>Service area</span></div>', unsafe_allow_html=True)
-        st_folium(build_map(),width=None,height=430,key="overview_map",returned_objects=[])
+        route_lines = {v: r["bins"] for v, r in data.get("routes", {}).items()}
+        st_folium(build_map(route_lines=route_lines), width=None, height=430, key="overview_map", returned_objects=[])
     with b:
-        st.markdown('<div class="section-head"><span>Priority queue</span></div>', unsafe_allow_html=True)
-        for row in sorted(bins,key=priority_score,reverse=True)[:6]:
-            score=priority_score(row)
-            color="#f07878" if score>=80 else "#e6b65f" if score>=60 else "#75d69b"
-            st.markdown(f'<div class="panel" style="padding:12px 14px;margin-bottom:9px"><div style="display:flex;justify-content:space-between"><b>{row["id"]}</b><span style="color:{color};font-size:12px;font-weight:700">{score:.0f} priority</span></div><div style="color:#91a99a;font-size:11px;margin:4px 0 8px">{row["area"]} · {row["type"]}</div><div style="height:6px;background:#263c30;border-radius:9px"><div style="height:6px;width:{row["fill_pct"]}%;background:{color};border-radius:9px"></div></div><div style="display:flex;justify-content:space-between;color:#a9c0b1;font-size:11px;margin-top:5px"><span>{row["fill_pct"]:.0f}% full</span><span>{row["capacity_l"]} L</span></div></div>',unsafe_allow_html=True)
+        st.markdown('<div class="section-head"><span>Priority queue</span><span>Fuzzy + AI forecast</span></div>', unsafe_allow_html=True)
+        for row in sorted(bins, key=priority_score, reverse=True)[:6]:
+            score = priority_score(row)
+            forecast = predict_next_fill(row)
+            forecast_html = (
+                f'<span style="color:#8fe0b2;font-size:10px;background:rgba(143,224,178,.12);padding:2px 6px;border-radius:99px">'
+                f'Next hr: {forecast:.0f}%</span>'
+                if forecast is not None
+                else ""
+            )
+            color = "#f07878" if score >= 80 else "#e6b65f" if score >= 60 else "#75d69b"
+            st.markdown(
+                f'<div class="panel" style="padding:12px 14px;margin-bottom:9px">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                f'<b>{row["id"]}</b>'
+                f'<div style="display:flex;gap:6px;align-items:center">{forecast_html}'
+                f'<span style="color:{color};font-size:12px;font-weight:700">{score:.0f} priority</span></div></div>'
+                f'<div style="color:#91a99a;font-size:11px;margin:4px 0 8px">{row["area"]} · {row["type"]}</div>'
+                f'<div style="height:6px;background:#263c30;border-radius:9px">'
+                f'<div style="height:6px;width:{row["fill_pct"]}%;background:{color};border-radius:9px"></div></div>'
+                f'<div style="display:flex;justify-content:space-between;color:#a9c0b1;font-size:11px;margin-top:5px">'
+                f'<span>{row["fill_pct"]:.0f}% full</span><span>{row["capacity_l"]} L</span></div></div>',
+                unsafe_allow_html=True,
+            )
     x,y = st.columns([1.2,1])
     with x:
         st.markdown('<div class="section-head"><span>Completed collections · 24 hours</span></div>',unsafe_allow_html=True)
@@ -483,14 +626,36 @@ elif selected == "Bin network":
         table=pd.DataFrame(filtered)
         if not table.empty:
             table["priority"]=table.apply(lambda r:priority_score(r.to_dict()),axis=1)
-            st.dataframe(table[["id","area","type","fill_pct","capacity_l","status","priority","battery_pct"]].rename(columns={"id":"Bin ID","area":"Area","type":"Waste type","fill_pct":"Fill %","capacity_l":"Capacity (L)","status":"Status","priority":"Priority","battery_pct":"Battery %"}),width="stretch",hide_index=True)
+            table["forecast_pct"]=table.apply(lambda r:predict_next_fill(r.to_dict()),axis=1)
+            st.dataframe(
+                table[["id","area","type","fill_pct","forecast_pct","capacity_l","status","priority","battery_pct"]].rename(
+                    columns={"id":"Bin ID","area":"Area","type":"Waste type","fill_pct":"Fill %","forecast_pct":"AI Forecast %","capacity_l":"Capacity (L)","status":"Status","priority":"Priority","battery_pct":"Battery %"}
+                ),
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Fill %": st.column_config.ProgressColumn("Fill %", min_value=0, max_value=100, format="%.1f%%"),
+                    "AI Forecast %": st.column_config.NumberColumn("AI Forecast %", format="%.1f%%"),
+                    "Priority": st.column_config.NumberColumn("Priority", format="%.1f"),
+                    "Battery %": st.column_config.ProgressColumn("Battery %", min_value=0, max_value=100, format="%d%%"),
+                },
+            )
     if filtered:
-        st.markdown('<div class="section-head"><span>Recent telemetry</span><span>Fill trend</span></div>',unsafe_allow_html=True)
+        st.markdown('<div class="section-head"><span>Recent telemetry</span><span>Fill trend & AI forecast</span></div>',unsafe_allow_html=True)
         selected_telemetry_bin=st.selectbox("Collection point history",[row["id"] for row in filtered],key="telemetry_bin")
+        chosen_bin = next(b for b in filtered if b["id"] == selected_telemetry_bin)
         readings=[item for item in data.get("telemetry_history",[]) if item["bin_id"]==selected_telemetry_bin]
         if readings:
-            trend=pd.DataFrame(readings).sort_values("time").tail(24).set_index("time")
-            st.line_chart(trend[["fill_pct"]],height=190,color="#72d69d")
+            t_col1, t_col2 = st.columns([3, 1])
+            with t_col1:
+                trend=pd.DataFrame(readings).sort_values("time").tail(24).set_index("time")
+                st.line_chart(trend[["fill_pct"]],height=190,color="#72d69d")
+            with t_col2:
+                pred = predict_next_fill(chosen_bin)
+                st.metric("Current fill", f'{chosen_bin["fill_pct"]:.1f}%', border=True)
+                if pred is not None:
+                    delta_val = round(pred - chosen_bin["fill_pct"], 1)
+                    st.metric("AI next-hour forecast", f"{pred:.1f}%", delta=f"{delta_val:+.1f}%", border=True)
         else:
             st.info("No telemetry history is available for this collection point yet.")
     st.markdown('<div class="section-head"><span>Collection point controls</span></div>',unsafe_allow_html=True)
@@ -707,14 +872,19 @@ elif selected == "Fleet":
 # ---------------------------------------------------------------------------
 elif selected == "Analytics":
     c1,c2,c3,c4=st.columns(4)
-    c1.metric("Collection points",len(bins));c2.metric("Average fill",f"{avg_fill:.1f}%");c3.metric("Jobs completed",len(completed));c4.metric("Service completion",f'{(len(completed)/max(1,len(jobs)))*100:.0f}%')
-    st.markdown('<div class="section-head"><span>Fill level distribution</span></div>',unsafe_allow_html=True)
-    distribution=pd.DataFrame({"Collection point":[b["id"] for b in bins],"Fill level":[b["fill_pct"] for b in bins]}).set_index("Collection point")
-    st.bar_chart(distribution,height=300,color="#72d69d")
+    c1.metric("Collection points",len(bins),border=True);c2.metric("Average fill",f"{avg_fill:.1f}%",border=True);c3.metric("Jobs completed",len(completed),border=True);c4.metric("Service completion",f'{(len(completed)/max(1,len(jobs)))*100:.0f}%',border=True)
+    st.markdown('<div class="section-head"><span>Fill level distribution & AI forecast</span></div>',unsafe_allow_html=True)
+    forecast_rows = []
+    for b in bins:
+        pred = predict_next_fill(b)
+        forecast_rows.append({"Collection point": b["id"], "Current fill %": b["fill_pct"], "AI next-hour %": pred if pred is not None else b["fill_pct"]})
+    distribution = pd.DataFrame(forecast_rows).set_index("Collection point")
+    st.bar_chart(distribution, height=300, color=["#72d69d", "#69aee8"])
     left,right=st.columns(2)
     with left:
-        st.markdown('<div class="section-head"><span>Collection volume trend</span></div>',unsafe_allow_html=True)
-        st.area_chart(pd.DataFrame(data["history"]).set_index("time")[["collected"]],height=250,color="#65b9df")
+        st.markdown('<div class="section-head"><span>Average fill by area</span></div>',unsafe_allow_html=True)
+        area_df = pd.DataFrame(bins).groupby("area", as_index=True)[["fill_pct"]].mean().rename(columns={"fill_pct": "Avg fill %"})
+        st.bar_chart(area_df, height=250, color="#65b9df")
     with right:
         st.markdown('<div class="section-head"><span>Service status mix</span></div>',unsafe_allow_html=True)
         status_counts=pd.Series([b["status"] for b in bins]).value_counts()
