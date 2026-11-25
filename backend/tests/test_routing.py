@@ -196,3 +196,44 @@ def test_ors_route_rejects_invalid_provider_geometry(monkeypatch):
     monkeypatch.setattr(routing, "_ors_post", fake_post)
     with pytest.raises(RoutingError, match="invalid route coordinates"):
         run(routing.road_route(COORDINATES))
+
+
+def test_resilient_matrix_falls_back_to_labelled_estimate_outside_production(monkeypatch):
+    async def failing(_coordinates):
+        raise RoutingError("provider down")
+
+    monkeypatch.setattr(routing, "road_matrix", failing)
+    monkeypatch.setattr(routing.settings, "app_env", "development")
+    monkeypatch.setattr(routing.settings, "routing_fallback", True)
+    result = run(routing.resilient_matrix(COORDINATES))
+    assert result["estimated"] is True
+    size = len(COORDINATES)
+    assert len(result["distances_meters"]) == size
+    assert all(result["distances_meters"][i][i] == 0 for i in range(size))
+    assert result["distances_meters"][0][1] > 0
+
+
+def test_resilient_matrix_never_estimates_in_production(monkeypatch):
+    import pytest
+
+    async def failing(_coordinates):
+        raise RoutingError("provider down")
+
+    monkeypatch.setattr(routing, "road_matrix", failing)
+    monkeypatch.setattr(routing.settings, "app_env", "production")
+    monkeypatch.setattr(routing.settings, "routing_fallback", True)
+    with pytest.raises(RoutingError):
+        run(routing.resilient_matrix(COORDINATES))
+
+
+def test_resilient_route_estimate_has_geojson_linestring(monkeypatch):
+    async def failing(_coordinates):
+        raise RoutingError("provider down")
+
+    monkeypatch.setattr(routing, "road_route", failing)
+    monkeypatch.setattr(routing.settings, "app_env", "development")
+    monkeypatch.setattr(routing.settings, "routing_fallback", True)
+    result = run(routing.resilient_route(COORDINATES))
+    assert result["estimated"] is True
+    assert result["geometry"]["type"] == "LineString"
+    assert len(result["geometry"]["coordinates"]) == len(COORDINATES)

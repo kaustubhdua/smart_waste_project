@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     telemetry_future_skew_seconds: int = 300
     model_path: str = "../models/waste_model.pkl"
     use_model_for_dispatch: bool = False
+    # Development/training only: when the road provider is unreachable, plan with
+    # clearly labelled straight-line x detour-factor estimates instead of failing.
+    routing_fallback: bool = True
 
 
 def validate_production_settings(config: Settings) -> None:

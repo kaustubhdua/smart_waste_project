@@ -22,7 +22,7 @@ from .config import settings
 from .db import Base, engine, get_db
 from .models import Bin, Telemetry, CollectionJob, ServiceEvent, RoutePlan, Vehicle, Device, Driver, OperatorUser, OperatorSession, OperatorAuditEvent, OperatorBootstrap, DriverAction
 from .schemas import BinCreate, BinOut, TelemetryIn, JobCreate, TransitionIn, RouteRequest, VehicleCreate, JobAssign, DispatchRequest, DeviceCreate, DriverCreate, DriverTransition, AuthBootstrap, AuthLogin, OperatorUserCreate, AuthPasswordChange
-from .routing import road_route, road_matrix, RoutingError
+from .routing import resilient_route as road_route, resilient_matrix as road_matrix, RoutingError
 from .optimizer import optimize_cvrp, OptimizationError
 from .priority import calculate_priority
 
@@ -832,8 +832,9 @@ async def optimize_route(payload: RouteRequest, db: Session = Depends(get_db)):
     except (OptimizationError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc
     plan_id = str(uuid4())
-    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": settings.routing_provider.upper(), "solver": optimized["solver"], "data_mode": "telemetry-derived demand; verify sensor calibration before operational use"}
-    db.add(RoutePlan(id=plan_id, depot_latitude=payload.depot_latitude, depot_longitude=payload.depot_longitude, routing_provider=settings.routing_provider.upper(), solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
+    routing_label = "ESTIMATE" if matrix.get("estimated") else settings.routing_provider.upper()
+    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": routing_label, "solver": optimized["solver"], "data_mode": "telemetry-derived demand; verify sensor calibration before operational use"}
+    db.add(RoutePlan(id=plan_id, depot_latitude=payload.depot_latitude, depot_longitude=payload.depot_longitude, routing_provider=routing_label, solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
     db.commit()
     return {"route_plan_id": plan_id, **response_payload}
 
@@ -1021,8 +1022,9 @@ async def dispatch_approved_jobs(payload: DispatchRequest, principal: dict = Dep
         db.rollback()
         raise HTTPException(422, str(exc)) from exc
     plan_id = str(uuid4())
-    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": settings.routing_provider.upper(), "solver": optimized["solver"], "assigned_job_ids": sorted(assigned_job_ids), "data_mode": "approved jobs with fresh telemetry; verify sensor calibration before operational use"}
-    db.add(RoutePlan(id=plan_id, depot_latitude=depot[0], depot_longitude=depot[1], routing_provider=settings.routing_provider.upper(), solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
+    routing_label = "ESTIMATE" if matrix.get("estimated") else settings.routing_provider.upper()
+    response_payload = {"routes": route_details, "total_distance_meters": optimized["total_distance_meters"], "routing_provider": routing_label, "solver": optimized["solver"], "assigned_job_ids": sorted(assigned_job_ids), "data_mode": "approved jobs with fresh telemetry; verify sensor calibration before operational use"}
+    db.add(RoutePlan(id=plan_id, depot_latitude=depot[0], depot_longitude=depot[1], routing_provider=routing_label, solver=optimized["solver"], total_distance_meters=optimized["total_distance_meters"], route_payload=json.dumps(response_payload)))
     db.commit()
     return {"route_plan_id": plan_id, **response_payload}
 
@@ -1073,10 +1075,10 @@ async def production_response_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-        "form-action 'self'; script-src 'self' https://unpkg.com; "
-        "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "form-action 'self'; script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://tile.openstreetmap.org; "
-        "font-src 'self' data: https://unpkg.com; connect-src 'self' https:; upgrade-insecure-requests"
+        "font-src 'self' data:; connect-src 'self' https:; upgrade-insecure-requests"
     )
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000"

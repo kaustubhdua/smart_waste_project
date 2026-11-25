@@ -166,7 +166,7 @@ def test_dispatch_optimizes_approved_jobs_and_assigns_vehicle(monkeypatch):
         assert client.post("/api/v1/telemetry", json=telemetry, headers=device_headers).status_code == 202
     preview = client.post("/api/v1/routes/optimize", json={
         "bin_ids": ["dispatch-a", "dispatch-b"], "depot_latitude": 28.6,
-        "depot_longitude": 77.2, "num_vehicles": 1, "vehicle_capacity_liters": 500,
+        "depot_longitude": 77.2, "num_vehicles": 1, "vehicle_capacity_liters": 700,
     }, headers=OP)
     assert preview.status_code == 200, preview.text
     assert preview.json()["routing_provider"] == "ORS"

@@ -86,7 +86,7 @@ test("driver can start and complete an assigned stop", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Mark collected" })).toBeVisible();
   await page.getByRole("button", { name: "Mark collected" }).click();
   await expect(page.getByText(/No assigned or in-progress jobs/)).toBeVisible();
-  await expect(page.locator("#status")).toContainText(/loaded 0 assigned stops/i);
+  await expect(page.locator("#status")).toContainText(/stop completed/i);
 });
 
 
@@ -443,8 +443,8 @@ test("administrator can provision and revoke operator accounts from the console"
 });
 
 test("operator sees readable route cards from real road-optimization API responses", async ({ page }) => {
-  await page.route("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", route => route.fulfill({ status: 200, contentType: "text/css", body: "" }));
-  await page.route("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js", route => route.fulfill({
+  await page.route("**/vendor/leaflet/leaflet.css", route => route.fulfill({ status: 200, contentType: "text/css", body: "" }));
+  await page.route("**/vendor/leaflet/leaflet.js", route => route.fulfill({
     status: 200,
     contentType: "application/javascript",
     body: `window.L = {

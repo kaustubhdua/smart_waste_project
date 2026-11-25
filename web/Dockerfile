@@ -10,3 +10,4 @@ COPY driver.js /usr/share/nginx/html/driver.js
 COPY rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf
 
 COPY driver-sw.js /usr/share/nginx/html/driver-sw.js
+COPY vendor /usr/share/nginx/html/vendor

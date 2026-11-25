@@ -4,6 +4,8 @@ let syncing = false;
 const DB_NAME = "wasteops-driver-offline";
 const DB_VERSION = 1;
 
+function shortId(id){return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)?id.slice(0,8):id}
+function fmtCoord(v){const n=Number(v);return Number.isFinite(n)?n.toFixed(5):"—"}
 function setStatus(message, type = "") {
   const element = $("status");
   element.textContent = message;
@@ -12,7 +14,7 @@ function setStatus(message, type = "") {
 function setConnection() {
   const element = $("connection");
   element.textContent = navigator.onLine
-    ? "Online · pending actions will sync when you sign in."
+    ? (connected ? "Online · connected. Actions are sent immediately." : "Online · sign in to load your stops.")
     : "Offline · cached stops are available and new actions will be queued on this device.";
   element.className = "status " + (navigator.onLine ? "ok" : "error");
 }
@@ -204,7 +206,7 @@ async function renderJobs(jobs) {
     head.append(title, status);
     const details = document.createElement("p");
     details.className = "sub";
-    details.textContent = "Job " + job.id.slice(0, 8) + " · " + Number(job.demand_liters).toFixed(1) + " L · priority " + Number(job.priority).toFixed(1) + " · " + job.latitude + ", " + job.longitude;
+    details.textContent = "Job " + shortId(job.id) + " · " + Number(job.demand_liters).toFixed(1) + " L · priority " + Number(job.priority).toFixed(1) + " · " + fmtCoord(job.latitude) + ", " + fmtCoord(job.longitude);
     card.append(head, details);
     const actionsRoot = document.createElement("div");
     actionsRoot.className = "actions";
@@ -240,14 +242,14 @@ async function renderJobs(jobs) {
     root.append(empty);
   }
 }
-async function loadJobs() {
+async function loadJobs(quiet = false) {
   if (!connected) return setStatus("Enter driver credentials first.", "error");
-  setStatus("Loading assigned jobs…");
+  if (!quiet) setStatus("Loading assigned jobs…");
   try {
     const jobs = await request("/api/v1/driver/jobs");
     await saveCachedJobs($("driverId").value.trim(), jobs);
     await renderJobs(jobs);
-    setStatus("Loaded " + jobs.length + " assigned stops.", "ok");
+    if (!quiet) setStatus("Loaded " + jobs.length + " assigned stops.", "ok");
   } catch (error) {
     if (error.network || (error.status && error.status >= 500)) {
       const cached = await cachedJobs($("driverId").value.trim());
@@ -292,8 +294,8 @@ async function transition(jobId, status) {
   }
   try {
     await sendQueuedAction(action);
-    setStatus("Job updated: " + status, "ok");
-    await loadJobs();
+    await loadJobs(true);
+    setStatus(status === "in_progress" ? "Stop started." : status === "completed" ? "Collection recorded. Stop completed." : "Exception reported to dispatch.", "ok");
   } catch (error) {
     if (error.network || (error.status && error.status >= 500) || error.status === 429) {
       await writeRecord("actions", action);
@@ -354,6 +356,7 @@ $("login").addEventListener("submit", async event => {
   sessionStorage.setItem("wasteops-driver-id", driverId);
   sessionStorage.setItem("wasteops-driver-token", token);
   connected = true;
+  setConnection();
   await loadJobs();
   await syncQueue();
 });
@@ -364,6 +367,7 @@ $("signout").addEventListener("click", async () => {
   sessionStorage.removeItem("wasteops-driver-id");
   sessionStorage.removeItem("wasteops-driver-token");
   connected = false;
+  setConnection();
   $("driverId").value = "";
   $("token").value = "";
   if (driverId) await clearCachedJobs(driverId);

@@ -9,7 +9,7 @@ async function installLeafletStub(page) {
       geoJSON: () => ({ addTo() { return this; }, remove() { return this; } }),
     };
   });
-  await page.route("https://unpkg.com/**", route => route.fulfill({
+  await page.route("**/vendor/leaflet/**", route => route.fulfill({
     status: 200,
     contentType: "application/javascript",
     body: "/* Leaflet is stubbed for isolated UI tests. */",
@@ -80,7 +80,7 @@ test("operator console warns when job data cannot be refreshed", async ({ page }
 });
 
 test("operator console still lists bins when the Leaflet map library cannot load", async ({ page }) => {
-  await page.route("https://unpkg.com/**", route => route.abort());
+  await page.route("**/vendor/leaflet/**", route => route.abort());
   await page.route("**/api/v1/bins", route => route.fulfill({ json: [{
     id: "BIN-NOMAP", latitude: 28.6, longitude: 77.2, capacity_liters: 800, criticality: 2, source: "imported",
   }] }));
