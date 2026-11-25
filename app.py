@@ -297,7 +297,14 @@ def predict_next_fill(row: dict) -> float | None:
 
 def build_map(selected_ids=None, route_lines=None, height=480):
     selected_ids = set(selected_ids or [])
-    m = folium.Map(location=DEPOT, zoom_start=12, tiles="CartoDB dark_matter", control_scale=True)
+    m = folium.Map(location=DEPOT, zoom_start=12, tiles=None, control_scale=True)
+    folium.TileLayer(
+        tiles="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+        name="Dark",
+        max_zoom=19,
+        subdomains="abcd",
+    ).add_to(m)
     folium.Circle(
         DEPOT,
         radius=260,
